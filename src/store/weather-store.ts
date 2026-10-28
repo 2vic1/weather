@@ -30,6 +30,10 @@ interface WeatherStore {
   flyTarget: { lat: number; lon: number; zoom: number; ts: number } | null
   flyTo: (lat: number, lon: number, zoom: number) => void
 
+  /** live map view (updated on moveend/zoomend) — used to show/hide the "back to overview" button */
+  mapView: { zoom: number; lat: number; lon: number }
+  setMapView: (v: { zoom: number; lat: number; lon: number }) => void
+
   // map layers
   baseLayer: BaseLayerId
   setBaseLayer: (b: BaseLayerId) => void
@@ -88,6 +92,9 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
 
   flyTarget: null,
   flyTo: (lat, lon, zoom) => set({ flyTarget: { lat, lon, zoom, ts: Date.now() } }),
+
+  mapView: { zoom: 5, lat: 32.6, lon: 52.5 },
+  setMapView: (v) => set({ mapView: v }),
 
   baseLayer: 'dark',
   setBaseLayer: (b) => set({ baseLayer: b }),

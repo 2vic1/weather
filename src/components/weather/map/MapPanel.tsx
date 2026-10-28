@@ -171,6 +171,24 @@ function SelectedMarker() {
   return <Marker position={[city.lat, city.lon]} icon={icon} zIndexOffset={1000} title={city.name} />
 }
 
+/** Reports the live map view (zoom + center) to the store on every move/zoom end */
+function ViewTracker() {
+  const setMapView = useWeatherStore((s) => s.setMapView)
+  useMapEvents({
+    moveend: (e) => {
+      const m = e.target as L.Map
+      const c = m.getCenter()
+      setMapView({ zoom: m.getZoom(), lat: c.lat, lon: c.lng })
+    },
+    zoomend: (e) => {
+      const m = e.target as L.Map
+      const c = m.getCenter()
+      setMapView({ zoom: m.getZoom(), lat: c.lat, lon: c.lng })
+    },
+  })
+  return null
+}
+
 function MapController() {
   const map = useMap()
   const city = useWeatherStore((s) => s.city)
@@ -244,6 +262,7 @@ export default function MapPanel() {
       <FieldCanvas />
       <StormEffects />
       <MapController />
+      <ViewTracker />
     </MapContainer>
   )
 }

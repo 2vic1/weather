@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { CloudSun, PanelLeftClose, PanelLeftOpen, Globe2 } from 'lucide-react'
+import { CloudSun, PanelLeftClose, PanelLeftOpen, Globe2, LocateFixed } from 'lucide-react'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useWeatherStore } from '@/store/weather-store'
 import CitySearch from './CitySearch'
@@ -23,6 +23,33 @@ const MapPanel = dynamic(() => import('./map/MapPanel'), {
     </div>
   ),
 })
+
+const IRAN_OVERVIEW = { lat: 32.6, lon: 52.5, zoom: 5 }
+
+/** Floating pill that appears when the map is zoomed into a city / far from Iran —
+ *  lets the user return to the general country view without refreshing. */
+function OverviewPill() {
+  const mapView = useWeatherStore((s) => s.mapView)
+  const flyTo = useWeatherStore((s) => s.flyTo)
+
+  const dLat = mapView.lat - IRAN_OVERVIEW.lat
+  const dLon =
+    (mapView.lon - IRAN_OVERVIEW.lon) * Math.cos((IRAN_OVERVIEW.lat * Math.PI) / 180)
+  const distKm = Math.sqrt(dLat * dLat + dLon * dLon) * 111
+  const focused = mapView.zoom > 6 || distKm > 700
+
+  if (!focused) return null
+  return (
+    <button
+      onClick={() => flyTo(IRAN_OVERVIEW.lat, IRAN_OVERVIEW.lon, IRAN_OVERVIEW.zoom)}
+      className="glass-strong pointer-events-auto flex items-center gap-1.5 rounded-full border-amber-400/40 px-3 py-1.5 text-[11px] font-bold text-amber-300 shadow-lg transition-all hover:border-amber-400/70 hover:bg-amber-400/15"
+      title="بازگشت به نمای کلی نقشه ایران"
+    >
+      <LocateFixed className="h-3.5 w-3.5" />
+      بازگشت به نمای کلی ایران
+    </button>
+  )
+}
 
 function TehranClock() {
   const [now, setNow] = useState<string>('')
@@ -68,6 +95,12 @@ export default function WeatherDashboard() {
             <div className="text-sm font-black leading-tight">آسمان‌نگار</div>
             <div className="text-[10px] text-muted-foreground">سامانه جامع رصد جوّ و هواشناسی</div>
           </div>
+          <span
+            className="whitespace-nowrap rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold text-amber-300"
+            title="طراحی و ساخت اختصاصی برای عبدالامیر"
+          >
+            به سفارش عبدالامیر ✨
+          </span>
         </div>
 
         <div className="flex-1" />
@@ -99,6 +132,11 @@ export default function WeatherDashboard() {
           <div className="mb-2 hidden sm:block">
             <RegionJump />
           </div>
+        </div>
+
+        {/* back-to-overview pill — top center of the map */}
+        <div className="pointer-events-none absolute left-1/2 top-3 z-[1000] -translate-x-1/2">
+          <OverviewPill />
         </div>
 
         {/* timeline bottom center — centered between the side panels on desktop */}
