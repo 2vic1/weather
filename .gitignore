@@ -52,3 +52,9 @@ prompt
 server.log
 # Skills directory
 /skills/
+# sandbox / chat artifacts (not app code)
+/upload/
+/download/
+/.zscripts/
+/tests/
+/tool-results/
