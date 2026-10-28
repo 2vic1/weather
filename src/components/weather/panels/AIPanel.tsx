@@ -8,12 +8,15 @@ import {
   CalendarDays,
   Clock,
   Gauge,
+  Globe2,
   Layers,
   Lightbulb,
   Loader2,
   RefreshCw,
   Sparkles,
+  Timer,
   Wind,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -32,11 +35,12 @@ function cacheKey(lat: number, lon: number): string {
 }
 
 const STATUS_MESSAGES = [
-  'در حال بررسی داده‌های ایستگاه‌ها...',
-  'تحلیل توده‌های هوا...',
-  'بررسی لایه‌های جو...',
-  'محاسبه مسیر سامانه‌ها...',
-  'نهایی‌سازی پیش‌بینی...',
+  'در حال بررسی داده‌های ایستگاه‌ها و رادار...',
+  'تحلیل نقشه‌های سینوپتیک ۵۰۰ هکتوپاسکال...',
+  'محاسبه ناپایداری (CAPE و شاخص برخاستگی)...',
+  'ردیابی توده‌های هوا و مسیر سامانه‌ها...',
+  'بررسی لایه‌های جو و برش باد...',
+  'نهایی‌سازی تحلیل فوق‌قوی...',
 ]
 
 const EMPTY_DESCRIPTION =
@@ -55,6 +59,9 @@ function parseAnalysis(raw: unknown): AIAnalysis | null {
   const warnings = Array.isArray(r.warnings)
     ? r.warnings.filter((w): w is string => typeof w === 'string')
     : []
+  const hazards = Array.isArray(r.hazardsTimeline)
+    ? r.hazardsTimeline.filter((w): w is string => typeof w === 'string')
+    : []
   const confidence =
     typeof r.confidence === 'number' && Number.isFinite(r.confidence)
       ? Math.min(Math.max(r.confidence, 0), 1)
@@ -62,10 +69,13 @@ function parseAnalysis(raw: unknown): AIAnalysis | null {
   return {
     summary,
     currentAnalysis: str('currentAnalysis'),
+    synoptic: str('synoptic'),
     airMasses: str('airMasses'),
+    instability: str('instability'),
     atmosphereLayers: str('atmosphereLayers'),
     hourlyOutlook: str('hourlyOutlook'),
     weeklyOutlook: str('weeklyOutlook'),
+    hazardsTimeline: hazards,
     warnings,
     tips: str('tips'),
     confidence,
@@ -273,9 +283,12 @@ function AIPanel() {
           {/* Header: cache badge + regenerate */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-primary">تحلیل هوش مصنوعی</span>
+              <span className="text-sm font-bold text-primary">تحلیل فوق‌قوی هوش مصنوعی</span>
+              <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary/90">
+                پرو
+              </span>
               {fromCache && (
-                <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary/90">
+                <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                   نسخه ذخیره‌شده
                 </span>
               )}
@@ -317,6 +330,19 @@ function AIPanel() {
             </Section>
           )}
 
+          {/* 2.5) Synoptic analysis */}
+          {analysis.synoptic && (
+            <section className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Globe2 className="size-4 shrink-0 text-primary" aria-hidden />
+                <h3 className="text-sm font-bold text-primary">تحلیل سینوپتیک (نقشه‌های هم‌اکنون)</h3>
+              </div>
+              <div className="rounded-lg border-l-2 border-violet-400/40 bg-violet-500/5 px-3 py-2.5">
+                <p className="text-sm leading-7 text-foreground/90">{analysis.synoptic}</p>
+              </div>
+            </section>
+          )}
+
           {/* 3) Air masses (cyan left-border block) */}
           {analysis.airMasses && (
             <section className="space-y-1.5">
@@ -337,6 +363,40 @@ function AIPanel() {
             <Section icon={Layers} title="لایه‌های جو">
               {analysis.atmosphereLayers}
             </Section>
+          )}
+
+          {/* 4.5) Instability analysis */}
+          {analysis.instability && (
+            <section className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Zap className="size-4 shrink-0 text-primary" aria-hidden />
+                <h3 className="text-sm font-bold text-primary">ناپایداری و همرفت</h3>
+              </div>
+              <div className="rounded-lg border-l-2 border-amber-400/40 bg-amber-500/5 px-3 py-2.5">
+                <p className="text-sm leading-7 text-foreground/90">{analysis.instability}</p>
+              </div>
+            </section>
+          )}
+
+          {/* 4.6) Hazards timeline */}
+          {analysis.hazardsTimeline && analysis.hazardsTimeline.length > 0 && (
+            <section className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Timer className="size-4 shrink-0 text-primary" aria-hidden />
+                <h3 className="text-sm font-bold text-primary">خط زمانی خطرات ۴۸ ساعت</h3>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {analysis.hazardsTimeline.map((hz, i) => (
+                  <div
+                    key={`${i}-${hz.slice(0, 14)}`}
+                    className="flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 px-2.5 py-1.5"
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden />
+                    <p className="text-[13px] leading-6 text-foreground/90">{hz}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
 
           {/* 5) 48h outlook */}

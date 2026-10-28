@@ -46,13 +46,13 @@ export default function WindParticles() {
   useEffect(() => {
     if (!active) return
     const b = map.getBounds()
-    requestGrid(b.getSouth(), b.getNorth(), b.getWest(), b.getEast(), 9)
+    requestGrid('wind', b.getSouth(), b.getNorth(), b.getWest(), b.getEast(), 9)
     let timer: ReturnType<typeof setTimeout> | null = null
     const onMove = () => {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         const bb = map.getBounds()
-        requestGrid(bb.getSouth(), bb.getNorth(), bb.getWest(), bb.getEast(), 9)
+        requestGrid('wind', bb.getSouth(), bb.getNorth(), bb.getWest(), bb.getEast(), 9)
       }, 700)
     }
     map.on('moveend', onMove)
@@ -130,7 +130,7 @@ export default function WindParticles() {
       const dt = Math.min(48, now - lastTime) / 16.67 // in 16ms frames
       lastTime = now
 
-      const g = getGridState().grid
+      const g = getGridState('wind').grid
       // fade previous trails (keep transparency over map)
       ctx.globalCompositeOperation = 'destination-out'
       ctx.fillStyle = 'rgba(0, 0, 0, 0.075)'

@@ -180,6 +180,59 @@ export interface WindFieldResult {
   points: Array<{ lat: number; lon: number; speed: number; dir: number; temp: number }>
 }
 
+/** Fetch `current` variables for many coordinates in chunks, with per-point retry for missing values */
+async function multiPointCurrent<T>(
+  lats: number[],
+  lons: number[],
+  vars: string,
+  cachePrefix: string,
+  ttlMs: number
+): Promise<Array<T | null>> {
+  const N = lats.length
+  const results: Array<T | null> = new Array(N).fill(null)
+
+  const chunkSize = 50
+  const chunks: number[][] = []
+  for (let i = 0; i < N; i += chunkSize) chunks.push(Array.from({ length: Math.min(chunkSize, N - i) }, (_, k) => i + k))
+
+  const fetchChunk = async (idx: number[]): Promise<void> => {
+    const params = new URLSearchParams({
+      latitude: idx.map((i) => lats[i]).join(','),
+      longitude: idx.map((i) => lons[i]).join(','),
+      current: vars,
+      wind_speed_unit: 'kmh',
+      timezone: 'GMT',
+    })
+    const url = `https://api.open-meteo.com/v1/forecast?${params}`
+    const data = await cachedFetch<{ current?: Record<string, number | null> } | { current?: Record<string, number | null> }[]>(
+      `${cachePrefix}:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`,
+      url,
+      ttlMs
+    )
+    const arr = Array.isArray(data) ? data : [data]
+    for (let k = 0; k < idx.length; k++) {
+      const el = arr[k]
+      // store the unwrapped `current` object so callers read flat variables
+      if (el && el.current) results[idx[k]] = el.current as T
+    }
+  }
+
+  // first pass (parallel chunks)
+  await Promise.all(chunks.map((c) => fetchChunk(c).catch(() => {})))
+
+  // retry pass for missing points, in small batches
+  const missing = results.map((r, i) => (r === null ? i : -1)).filter((i) => i >= 0)
+  if (missing.length > 0) {
+    const retryChunks: number[][] = []
+    for (let i = 0; i < missing.length; i += 10) retryChunks.push(missing.slice(i, i + 10))
+    await Promise.all(
+      retryChunks.map((c) => fetchChunk(c).catch(() => {}))
+    )
+  }
+
+  return results
+}
+
 export async function fetchWindField(
   latMin: number,
   latMax: number,
@@ -196,42 +249,60 @@ export async function fetchWindField(
     }
   }
 
-  const fetchChunk = async (idx: number[]): Promise<WindFieldResult['points']> => {
-    type CurrentPoint = { current: { wind_speed_10m: number; wind_direction_10m: number; temperature_2m: number } }
-    const params = new URLSearchParams({
-      latitude: idx.map((i) => lats[i]).join(','),
-      longitude: idx.map((i) => lons[i]).join(','),
-      current: 'wind_speed_10m,wind_direction_10m,temperature_2m',
-      wind_speed_unit: 'kmh',
-      timezone: 'GMT',
-    })
-    const url = `https://api.open-meteo.com/v1/forecast?${params}`
-    const data = await cachedFetch<CurrentPoint | CurrentPoint[]>(
-      `wf:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`,
-      url,
-      20 * 60_000
-    )
-    const arr = Array.isArray(data) ? data : [data]
-    return arr.map((d, k) => ({
-      lat: lats[idx[k]],
-      lon: lons[idx[k]],
-      speed: d.current.wind_speed_10m,
-      dir: d.current.wind_direction_10m,
-      temp: d.current.temperature_2m,
-    }))
+  const data = await multiPointCurrent<{
+    wind_speed_10m: number | null
+    wind_direction_10m: number | null
+    temperature_2m: number | null
+  }>(lats, lons, 'wind_speed_10m,wind_direction_10m,temperature_2m', 'wf', 20 * 60_000)
+
+  return {
+    points: data.map((d, i) => ({
+      lat: lats[i],
+      lon: lons[i],
+      speed: d?.wind_speed_10m ?? NaN,
+      dir: d?.wind_direction_10m ?? NaN,
+      temp: d?.temperature_2m ?? NaN,
+    })),
+  }
+}
+
+// ===== Dense temperature field (temp heatmap, res up to 25×25) =====
+
+export interface TempFieldResult {
+  points: Array<{ lat: number; lon: number; temp: number }>
+  n: number
+}
+
+export async function fetchTempField(
+  latMin: number,
+  latMax: number,
+  lonMin: number,
+  lonMax: number,
+  n = 25
+): Promise<TempFieldResult> {
+  const lats: number[] = []
+  const lons: number[] = []
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      lats.push(round2(latMin + ((latMax - latMin) * i) / (n - 1)))
+      lons.push(round2(lonMin + ((lonMax - lonMin) * j) / (n - 1)))
+    }
   }
 
-  const all = Array.from({ length: n * n }, (_, i) => i)
-  const chunkSize = 25
-  const chunks: number[][] = []
-  for (let i = 0; i < all.length; i += chunkSize) chunks.push(all.slice(i, i + chunkSize))
-
-  const results = await Promise.all(
-    chunks.map((c) =>
-      fetchChunk(c).catch(() =>
-        c.map((i) => ({ lat: lats[i], lon: lons[i], speed: NaN, dir: NaN, temp: NaN }))
-      )
-    )
+  const data = await multiPointCurrent<{ temperature_2m: number | null }>(
+    lats,
+    lons,
+    'temperature_2m',
+    'tf',
+    15 * 60_000
   )
-  return { points: results.flat() }
+
+  return {
+    points: data.map((d, i) => ({
+      lat: lats[i],
+      lon: lons[i],
+      temp: d?.temperature_2m ?? NaN,
+    })),
+    n,
+  }
 }

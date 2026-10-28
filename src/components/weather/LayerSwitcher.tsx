@@ -11,7 +11,12 @@ import {
   Thermometer,
   MapPinned,
   Info,
+  Tornado,
+  Zap,
+  Palette,
 } from 'lucide-react'
+// this lucide version has no Hurricane icon — Tornado is the closest match
+const Hurricane = Tornado
 import { useState } from 'react'
 import { useWeatherStore, type BaseLayerId } from '@/store/weather-store'
 import { cn } from '@/lib/utils'
@@ -25,15 +30,28 @@ const BASES: Array<{ id: BaseLayerId; label: string; icon: typeof Moon }> = [
 ]
 
 const OVERLAYS: Array<{
-  id: 'radar' | 'satellite' | 'wind' | 'temp'
+  id: 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx'
   label: string
   source: string
   icon: typeof CloudRain
 }> = [
   { id: 'radar', label: 'رادار بارش', source: 'RainViewer', icon: CloudRain },
+  { id: 'tropical', label: 'حاره‌ای | طوفان‌ها', source: 'RainViewer', icon: Hurricane },
   { id: 'satellite', label: 'ماهواره ابر (IR)', source: 'NASA GIBS', icon: SatelliteIcon },
   { id: 'wind', label: 'حرکت توده‌های هوا', source: 'Open-Meteo', icon: Wind },
   { id: 'temp', label: 'لایه دما', source: 'Open-Meteo', icon: Thermometer },
+  { id: 'fx', label: 'جلوه‌های طوفانی', source: 'زنده', icon: Zap },
+]
+
+/** Approximate gradient swatches for RainViewer palettes 0..6 */
+const PALETTES: Array<{ id: number; label: string; swatch: string }> = [
+  { id: 0, label: 'آبی جهانی', swatch: 'linear-gradient(90deg,#1d3f8f,#2f9bd8,#42d6c8,#a8e05f,#f9d64a)' },
+  { id: 1, label: 'تایتان', swatch: 'linear-gradient(90deg,#0b5e20,#2ecc40,#f1c40f,#e67e22,#c0392b)' },
+  { id: 2, label: 'کانال آب‌وهوا', swatch: 'linear-gradient(90deg,#16a085,#27ae60,#f4d03f,#e74c3c,#8e44ad)' },
+  { id: 3, label: 'متئورد', swatch: 'linear-gradient(90deg,#cfe8ff,#7fc8f8,#4aa5e0,#f5b041,#d35400)' },
+  { id: 4, label: 'نکس‌رَد', swatch: 'linear-gradient(90deg,#00c853,#ffeb3b,#ff9800,#f44336,#9c27b0)' },
+  { id: 5, label: 'رنگین‌کمان', swatch: 'linear-gradient(90deg,#2962ff,#00bcd4,#4caf50,#ffeb3b,#ff5722,#d500f9)' },
+  { id: 6, label: 'دارک‌اسکای', swatch: 'linear-gradient(90deg,#0d47a1,#00acc1,#26c6da,#ffee58,#ff7043)' },
 ]
 
 export default function LayerSwitcher() {
@@ -43,7 +61,25 @@ export default function LayerSwitcher() {
   const toggleOverlay = useWeatherStore((s) => s.toggleOverlay)
   const timelineMode = useWeatherStore((s) => s.timelineMode)
   const setTimelineMode = useWeatherStore((s) => s.setTimelineMode)
+  const radarColor = useWeatherStore((s) => s.radarColor)
+  const setRadarColor = useWeatherStore((s) => s.setRadarColor)
+  const flyTo = useWeatherStore((s) => s.flyTo)
   const [open, setOpen] = useState(true)
+
+  const paletteVisible = overlays.radar || overlays.tropical
+
+  const handleOverlay = (id: (typeof OVERLAYS)[number]['id']) => {
+    const turningOn = !overlays[id]
+    toggleOverlay(id)
+    if (id === 'radar' && turningOn && timelineMode !== 'radar') setTimelineMode('radar')
+    if (id === 'satellite' && turningOn) setTimelineMode('satellite')
+    if (id === 'tropical' && turningOn) {
+      // tropical storm mode: radar timeline + storm effects + jump to the tropical belt
+      if (timelineMode !== 'radar') setTimelineMode('radar')
+      if (!overlays.fx) toggleOverlay('fx')
+      flyTo(14, 62, 4)
+    }
+  }
 
   return (
     <div className="glass-strong pointer-events-auto w-56 rounded-2xl" dir="rtl">
@@ -94,10 +130,7 @@ export default function LayerSwitcher() {
               return (
                 <button
                   key={id}
-                  onClick={() => {
-                    toggleOverlay(id)
-                    if ((id === 'radar' || id === 'satellite') && !on) setTimelineMode(id)
-                  }}
+                  onClick={() => handleOverlay(id)}
                   className={cn(
                     'flex items-center justify-between rounded-lg border px-2 py-1.5 text-[11px] transition-all',
                     on
@@ -125,6 +158,45 @@ export default function LayerSwitcher() {
               )
             })}
           </div>
+
+          {/* radar / tropical color palette */}
+          {paletteVisible && (
+            <div className="mt-3 rounded-xl border border-border/50 bg-muted/20 p-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
+                <Palette className="h-3 w-3 text-primary" />
+                رنگ‌بندی رادار {overlays.tropical && <span className="text-primary">(حاره‌ای)</span>}
+              </div>
+              <div className="grid grid-cols-1 gap-1">
+                {PALETTES.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setRadarColor(p.id)}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg border px-2 py-1 text-[10px] transition-all',
+                      radarColor === p.id
+                        ? 'border-primary/70 bg-primary/15 font-bold text-primary'
+                        : 'border-transparent text-muted-foreground hover:bg-muted/60'
+                    )}
+                  >
+                    <span
+                      className="h-3 w-10 shrink-0 rounded-full border border-white/20"
+                      style={{ background: p.swatch }}
+                      aria-hidden
+                    />
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* tropical badge */}
+          {overlays.tropical && (
+            <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-500/10 p-2 text-[9px] leading-4 text-amber-300/90">
+              <Hurricane className="mt-0.5 h-3 w-3 shrink-0" />
+              حالت حاره‌ای فعال است: رادار زنده با رنگ دلخواه + رصد چرخندها در اقیانوس هند، دریای عرب و خلیج بنگال.
+            </div>
+          )}
 
           {/* temp legend */}
           {overlays.temp && (

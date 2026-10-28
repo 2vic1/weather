@@ -1,9 +1,12 @@
 'use client'
 
 // Shared in-memory grid cache for wind/temp map overlays.
-// Both WindParticles and TempHeatmap subscribe to the same fetched grid.
+// Two named fields: 'wind' (coarse, for particles) and 'temp' (dense, for heatmap).
+// Both subscribe to the same global listener set.
 
 import type { WindGridPoint } from '@/lib/weather-types'
+
+export type FieldName = 'wind' | 'temp'
 
 export interface GridData {
   points: WindGridPoint[]
@@ -20,9 +23,19 @@ type GridState = {
   error: boolean
 }
 
-let state: GridState = { grid: null, loading: false, error: false }
-let inflight: Promise<void> | null = null
+const emptyState = (): GridState => ({ grid: null, loading: false, error: false })
+
+const states: Record<FieldName, GridState> = {
+  wind: emptyState(),
+  temp: emptyState(),
+}
+const inflights: Partial<Record<FieldName, Promise<void> | null>> = {}
 const listeners = new Set<() => void>()
+
+const ENDPOINTS: Record<FieldName, string> = {
+  wind: '/api/windfield',
+  temp: '/api/tempfield',
+}
 
 function emit() {
   listeners.forEach((l) => l())
@@ -35,14 +48,13 @@ export function subscribeGrid(fn: () => void): () => void {
   }
 }
 
-export function getGridState(): GridState {
-  return state
+export function getGridState(name: FieldName = 'wind'): GridState {
+  return states[name]
 }
 
 /** Should we refetch? Compare center distance + zoom delta with last fetch */
-export function shouldRefetch(latMin: number, latMax: number, lonMin: number, lonMax: number): boolean {
-  if (!state.grid) return true
-  const g = state.grid
+function shouldRefetch(g: GridData | null, latMin: number, latMax: number, lonMin: number, lonMax: number): boolean {
+  if (!g) return true
   const dcLat = Math.abs((latMin + latMax) / 2 - (g.latMin + g.latMax) / 2)
   const dcLon = Math.abs((lonMin + lonMax) / 2 - (g.lonMin + g.lonMax) / 2)
   const spanLat = Math.abs(latMax - latMin)
@@ -57,18 +69,21 @@ export function shouldRefetch(latMin: number, latMax: number, lonMin: number, lo
 }
 
 export function requestGrid(
+  name: FieldName,
   latMin: number,
   latMax: number,
   lonMin: number,
   lonMax: number,
-  res = 9
+  res = 9,
+  padRatio = 0.35
 ): void {
-  if (!shouldRefetch(latMin, latMax, lonMin, lonMax)) return
-  if (inflight) return
+  const state = states[name]
+  if (!shouldRefetch(state.grid, latMin, latMax, lonMin, lonMax)) return
+  if (inflights[name]) return
 
   // pad bounds so particles cover panning margin
-  const padLat = (latMax - latMin) * 0.35 + 1.2
-  const padLon = (lonMax - lonMin) * 0.35 + 1.2
+  const padLat = (latMax - latMin) * padRatio + 0.8
+  const padLon = (lonMax - lonMin) * padRatio + 0.8
   const pLatMin = Math.max(-85, latMin - padLat)
   const pLatMax = Math.min(85, latMax + padLat)
   const pLonMin = Math.max(-179, lonMin - padLon)
@@ -82,13 +97,13 @@ export function requestGrid(
     res: String(res),
   })
 
-  state = { ...state, loading: true, error: false }
+  states[name] = { ...state, loading: true, error: false }
   emit()
 
-  inflight = fetch(`/api/windfield?${params}`)
+  inflights[name] = fetch(`${ENDPOINTS[name]}?${params}`)
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
     .then((data: { points: WindGridPoint[] }) => {
-      state = {
+      states[name] = {
         grid: {
           points: data.points,
           latMin: pLatMin,
@@ -103,11 +118,11 @@ export function requestGrid(
       emit()
     })
     .catch(() => {
-      state = { ...state, loading: false, error: true }
+      states[name] = { ...states[name], loading: false, error: true }
       emit()
     })
     .finally(() => {
-      inflight = null
+      inflights[name] = null
     })
 }
 

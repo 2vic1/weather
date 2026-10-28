@@ -11,6 +11,7 @@ import {
   subscribeGrid,
 } from './gridCache'
 import { tempColor } from '@/lib/weather-codes'
+import { faNum } from '@/lib/format'
 
 export default function TempHeatmap() {
   const map = useMap()
@@ -25,13 +26,14 @@ export default function TempHeatmap() {
   useEffect(() => {
     if (!active) return
     const b = map.getBounds()
-    requestGrid(b.getSouth(), b.getNorth(), b.getWest(), b.getEast(), 9)
+    // dense grid (25×25) with small padding — covers Iran + surroundings
+    requestGrid('temp', b.getSouth(), b.getNorth(), b.getWest(), b.getEast(), 25, 0.12)
     let timer: ReturnType<typeof setTimeout> | null = null
     const onMove = () => {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         const bb = map.getBounds()
-        requestGrid(bb.getSouth(), bb.getNorth(), bb.getWest(), bb.getEast(), 9)
+        requestGrid('temp', bb.getSouth(), bb.getNorth(), bb.getWest(), bb.getEast(), 25, 0.12)
       }, 600)
     }
     map.on('moveend', onMove)
@@ -78,41 +80,50 @@ export default function TempHeatmap() {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-      const g = getGridState().grid
+      const g = getGridState('temp').grid
       if (!g) return
 
       const w = container.clientWidth
       const h = container.clientHeight
-      const radius = Math.max(30, Math.min(70, w / 14))
+      const radius = Math.max(34, Math.min(64, w / 18))
       const zoom = map.getZoom()
-      const showLabels = zoom >= 7
 
-      // paint grid points
+      // label density by zoom (grid index step)
+      const step = zoom < 6 ? 6 : zoom < 7 ? 4 : zoom < 8 ? 3 : zoom < 9 ? 2 : 1
+
+      // paint grid points — smooth overlapping radial gradients
       ctx.globalCompositeOperation = 'source-over'
-      for (const p of g.points) {
-        if (p.lat < g.latMin || p.lat > g.latMax) continue
-        const pt = map.latLngToContainerPoint([p.lat, p.lon])
-        if (pt.x < -radius || pt.x > w + radius || pt.y < -radius || pt.y > h + radius) continue
-        const sample = sampleGrid(g, p.lat, p.lon)
-        if (!sample || Number.isNaN(sample.temp)) continue
-        const [r, gg, b] = tempColor(sample.temp)
-        const grad = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, radius)
-        grad.addColorStop(0, `rgba(${r}, ${gg}, ${b}, 0.34)`)
-        grad.addColorStop(1, `rgba(${r}, ${gg}, ${b}, 0)`)
-        ctx.fillStyle = grad
-        ctx.beginPath()
-        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2)
-        ctx.fill()
+      let li = 0
+      for (let i = 0; i < g.n; i++) {
+        for (let j = 0; j < g.n; j++) {
+          const p = g.points[i * g.n + j]
+          if (!p || Number.isNaN(p.temp)) continue
+          if (p.lat < g.latMin || p.lat > g.latMax) continue
+          const pt = map.latLngToContainerPoint([p.lat, p.lon])
+          if (pt.x < -radius || pt.x > w + radius || pt.y < -radius || pt.y > h + radius) continue
+          const [r, gg, b] = tempColor(p.temp)
+          const grad = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, radius)
+          grad.addColorStop(0, `rgba(${r}, ${gg}, ${b}, 0.34)`)
+          grad.addColorStop(0.7, `rgba(${r}, ${gg}, ${b}, 0.13)`)
+          grad.addColorStop(1, `rgba(${r}, ${gg}, ${b}, 0)`)
+          ctx.fillStyle = grad
+          ctx.beginPath()
+          ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2)
+          ctx.fill()
 
-        if (showLabels) {
-          ctx.fillStyle = 'rgba(255,255,255,0.92)'
-          ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.shadowColor = 'rgba(0,0,0,0.8)'
-          ctx.shadowBlur = 4
-          ctx.fillText(`${Math.round(sample.temp)}°`, pt.x, pt.y)
-          ctx.shadowBlur = 0
+          // temperature labels on a zoom-aware sub-grid
+          if (i % step === 0 && j % step === 0 && li < 90) {
+            const label = `${faNum(Math.round(p.temp))}°`
+            ctx.fillStyle = 'rgba(255,255,255,0.95)'
+            ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.shadowColor = 'rgba(0,0,0,0.85)'
+            ctx.shadowBlur = 4
+            ctx.fillText(label, pt.x, pt.y)
+            ctx.shadowBlur = 0
+            li++
+          }
         }
       }
     }

@@ -130,4 +130,10 @@ export interface AIAnalysis {
   warnings: string[]
   tips: string
   confidence: number
+  /** تحلیل سینوپتیک نقشه‌های هم‌اکنون (ژئوپتانسیل ۵۰۰، ناوه‌ها، سامانه‌ها) */
+  synoptic?: string
+  /** تحلیل ناپایداری: CAPE، شاخص برخاستگی، برش باد، احتمال رگبار/رعدوبرق */
+  instability?: string
+  /** خط زمانی خطرات ۴۸ ساعت آینده */
+  hazardsTimeline?: string[]
 }

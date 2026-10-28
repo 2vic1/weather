@@ -11,8 +11,11 @@ export default function TimelineControl() {
   const timelineMode = useWeatherStore((s) => s.timelineMode)
   const setTimelineMode = useWeatherStore((s) => s.setTimelineMode)
   const frames = useWeatherStore((s) => s.frames)
+  const satFrames = useWeatherStore((s) => s.satFrames)
   const frameIndex = useWeatherStore((s) => s.frameIndex)
+  const satIndex = useWeatherStore((s) => s.satIndex)
   const setFrameIndex = useWeatherStore((s) => s.setFrameIndex)
+  const setSatIndex = useWeatherStore((s) => s.setSatIndex)
   const playing = useWeatherStore((s) => s.playing)
   const setPlaying = useWeatherStore((s) => s.setPlaying)
   const setRainViewer = useWeatherStore((s) => s.setRainViewer)
@@ -21,6 +24,9 @@ export default function TimelineControl() {
 
   const [error, setError] = useState(false)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const isRadarMode = timelineMode === 'radar'
+  const modeFrames = isRadarMode ? frames : satFrames
 
   // fetch rainviewer frames
   useEffect(() => {
@@ -44,46 +50,54 @@ export default function TimelineControl() {
 
   // autoplay loop
   useEffect(() => {
-    if (!playing || frames.length === 0) {
+    if (!playing || modeFrames.length === 0) {
       if (tickRef.current) clearInterval(tickRef.current)
       return
     }
     tickRef.current = setInterval(() => {
-      setFrameIndex((useWeatherStore.getState().frameIndex + 1) % frames.length)
+      const s = useWeatherStore.getState()
+      if (s.timelineMode === 'radar') {
+        s.setFrameIndex((s.frameIndex + 1) % s.frames.length)
+      } else {
+        if (s.satFrames.length > 0) s.setSatIndex((s.satIndex + 1) % s.satFrames.length)
+      }
     }, 750)
     return () => {
       if (tickRef.current) clearInterval(tickRef.current)
     }
-  }, [playing, frames.length, setFrameIndex])
+  }, [playing, modeFrames.length])
 
   const selectMode = (m: 'radar' | 'satellite') => {
     if (timelineMode !== m) {
       setTimelineMode(m)
       // ensure corresponding overlay on
-      if (m === 'radar' && !overlays.radar) toggleOverlay('radar')
+      if (m === 'radar' && !overlays.radar && !overlays.tropical) toggleOverlay('radar')
       if (m === 'satellite' && !overlays.satellite) toggleOverlay('satellite')
     }
   }
 
-  const frame = frames[frameIndex]
+  const idx = isRadarMode ? frameIndex : satIndex
+  const frame = modeFrames[idx]
   const lastPastIdx = (() => {
-    for (let i = frames.length - 1; i >= 0; i--) {
-      if (!frames[i]?.nowcast) return i
+    for (let i = modeFrames.length - 1; i >= 0; i--) {
+      if (!modeFrames[i]?.nowcast) return i
     }
     return -1
   })()
   const minutesAhead =
     frame?.nowcast && lastPastIdx >= 0
-      ? Math.max(0, Math.round((frame.time - frames[lastPastIdx].time) / 60))
+      ? Math.max(0, Math.round((frame.time - modeFrames[lastPastIdx].time) / 60))
       : 0
 
   const satelliteNoFrames =
-    timelineMode === 'satellite' && frames.filter((f) => !f.nowcast).length === 0
+    timelineMode === 'satellite' && satFrames.length === 0
   const timeLabel =
-    frames.length === 0
+    modeFrames.length === 0
       ? error
         ? 'عدم اتصال به رادار'
-        : 'در حال دریافت...'
+        : satelliteNoFrames
+          ? 'تصویر روزانه GIBS'
+          : 'در حال دریافت...'
       : frame
         ? unixToFaTime(frame.time)
         : '...'
@@ -103,7 +117,7 @@ export default function TimelineControl() {
               ? 'bg-primary/25 text-primary font-bold'
               : 'text-muted-foreground hover:text-foreground'
           )}
-          title="رادار بارش لحظه‌ای"
+          title="رادار بارش لحظه‌ای و حاره‌ای"
         >
           <Radar className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">رادار</span>
@@ -138,13 +152,14 @@ export default function TimelineControl() {
           type="range"
           className="timeline-range w-full"
           min={0}
-          max={Math.max(frames.length - 1, 0)}
-          value={frameIndex}
+          max={Math.max(modeFrames.length - 1, 0)}
+          value={Math.min(idx, Math.max(modeFrames.length - 1, 0))}
           onChange={(e) => {
             setPlaying(false)
-            setFrameIndex(Number(e.target.value))
+            if (isRadarMode) setFrameIndex(Number(e.target.value))
+            else setSatIndex(Number(e.target.value))
           }}
-          disabled={frames.length === 0}
+          disabled={modeFrames.length === 0}
         />
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
           <span>۲ ساعت قبل</span>

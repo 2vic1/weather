@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { CityPoint, WeatherData, AtmosphereData } from '@/lib/weather-types'
+import { useWeatherStore } from '@/store/weather-store'
 
 function keyOf(city: CityPoint): string {
   return `${city.lat.toFixed(2)},${city.lon.toFixed(2)}`
@@ -13,6 +14,7 @@ export function useWeather(city: CityPoint) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const cacheRef = useRef(new Map<string, WeatherData>())
+  const setCurrentWeather = useWeatherStore((s) => s.setCurrentWeather)
 
   useEffect(() => {
     const key = keyOf(city)
@@ -39,6 +41,7 @@ export function useWeather(city: CityPoint) {
         const d = (await r.json()) as WeatherData
         cacheRef.current.set(key, d)
         setData(d)
+        setCurrentWeather(d.current)
         setLoading(false)
       } catch (e) {
         const err = e as Error
@@ -49,7 +52,7 @@ export function useWeather(city: CityPoint) {
     }
     void run()
     return () => ctrl.abort()
-  }, [city])
+  }, [city, setCurrentWeather])
 
   return { data, loading, error }
 }
