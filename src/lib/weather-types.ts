@@ -69,6 +69,8 @@ export interface WeatherData {
   daily: DailySlice
   fetchedAt: string
   sources: string[]
+  /** true when served by the om-mock demo upstream (real upstream dead + no cache) */
+  demo?: boolean
 }
 
 // ===== Atmosphere (pressure levels) =====

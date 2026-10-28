@@ -142,6 +142,7 @@ export async function cachedFetch<T>(key: string, url: string, ttlMs: number): P
     try {
       const data = await upstreamGet<T>(url)
       cache.set(key, { data, ts: now })
+      pruneCache()
       return data
     } catch (e) {
       const st = statusOf(e)
@@ -154,20 +155,23 @@ export async function cachedFetch<T>(key: string, url: string, ttlMs: number): P
     }
   }
 
-  // quota-dead / network-dead → deterministic mock upstream, then stale cache
+  // quota-dead / network-dead → 24 h-old REAL data beats freshly faked demo
+  // data: a weather map showing yesterday's systems is far less wrong than one
+  // showing invented ones, so the stale cache is always tried before the mock.
+  if (hit && now - hit.ts < STALE_MS) return hit.data as T
+
+  // last resort: deterministic mock upstream (UI demo mode)
+  // NOT cached — poisoned stale windows and delayed quota recovery are worse
+  // than re-hitting the loopback mock (it memoizes its series internally)
   const fb = fallbackUrl(url)
   if (fb) {
     try {
       // mock is plain http on loopback — global fetch handles it instantly
-      const data = await rawFetch<T>(fb).catch(() => https4Get<T>(fb))
-      cache.set(key, { data, ts: now })
-      pruneCache()
-      return data
+      return await rawFetch<T>(fb).catch(() => https4Get<T>(fb))
     } catch {
-      /* fall through to stale */
+      /* nothing left to try */
     }
   }
-  if (hit && now - hit.ts < STALE_MS) return hit.data as T
   throw new UpstreamError(breakerOpen ? 429 : 502, 'upstream unavailable and no cached data')
 }
 
@@ -242,6 +246,8 @@ export async function fetchWeather(lat: number, lon: number): Promise<WeatherDat
     hourly,
     daily,
     fetchedAt: new Date().toISOString(),
+    // demo upstream marker → UI can badge the card as simulated data
+    demo: (raw as { mock_source?: boolean }).mock_source === true,
     sources: [
       'Open-Meteo (ECMWF IFS, GFS, ICON)',
       'رادارهای هواشناسی — RainViewer',
@@ -411,7 +417,7 @@ export async function fetchWindField(
     wind_speed_10m: number | null
     wind_direction_10m: number | null
     temperature_2m: number | null
-  }>(lats, lons, 'wind_speed_10m,wind_direction_10m,temperature_2m', 'wf', 20 * 60_000)
+  }>(lats, lons, 'wind_speed_10m,wind_direction_10m,temperature_2m', 'wf', 30 * 60_000)
 
   return {
     points: data.map((d, i) => ({
@@ -454,7 +460,7 @@ export async function fetchTempField(
     lons,
     'temperature_2m',
     'tf',
-    15 * 60_000
+    30 * 60_000
   )
 
   return {
@@ -496,7 +502,7 @@ export interface ForecastFieldResult {
 
 /** Assembled-result cache (separate from raw URL cache) */
 const ffCache = new Map<string, { data: ForecastFieldResult; ts: number }>()
-const FF_TTL = 60 * 60_000
+const FF_TTL = 120 * 60_000 // 3-hourly steps + 6 h model runs → 2 h refresh is plenty
 const FF_STALE = 8 * 60 * 60_000 // serve up to 8 h old real data when upstream is dead
 const MAX_STEPS = 128
 const FF_CACHE_CAP = 24
@@ -519,20 +525,22 @@ export async function fetchForecastField(
   n = 20,
   stepHours = 3
 ): Promise<ForecastFieldResult> {
-  // super-region: view grown by 50 % of its span on every side, snapped to 0.5°
+  // super-region: view grown by 70 % of its span on every side, snapped to 0.5°
+  // (was 95 % — the giant margin diluted the grid to ~430 km/cell over Iran,
+  // which visually erased rain masses; 70 % keeps pan-reuse while ~27 % finer)
   const cLat = (latMin + latMax) / 2
   const cLon = (lonMin + lonMax) / 2
   const spanLat = Math.max(Math.abs(latMax - latMin), 12)
   const spanLon = Math.max(Math.abs(lonMax - lonMin), 15)
-  const bLatMin = snapOut(Math.max(-84, cLat - spanLat * 0.95), 'floor')
-  const bLatMax = snapOut(Math.min(84, cLat + spanLat * 0.95), 'ceil')
-  const bLonMin = snapOut(Math.max(-179, cLon - spanLon * 0.95), 'floor')
-  const bLonMax = snapOut(Math.min(179, cLon + spanLon * 0.95), 'ceil')
+  const bLatMin = snapOut(Math.max(-84, cLat - spanLat * 0.7), 'floor')
+  const bLatMax = snapOut(Math.min(84, cLat + spanLat * 0.7), 'ceil')
+  const bLonMin = snapOut(Math.max(-179, cLon - spanLon * 0.7), 'floor')
+  const bLonMax = snapOut(Math.min(179, cLon + spanLon * 0.7), 'ceil')
 
-  const regionSpanLat = bLatMax - bLatMin
   const ST = Math.min(Math.max(Math.round(stepHours), 1), 6)
-  // weight ≤ 576 calls per fetch, always below the 600/min burst ceiling
-  const nn = Math.min(Math.max(Math.round(regionSpanLat > 40 ? 24 : 20), 10), 24)
+  // weight ≤ 576 calls per fetch, always below the 600/min burst ceiling;
+  // always 24² — finer cells make compact rain systems actually visible
+  const nn = 24
 
   // key bump v2 → includes press/cape/snow series (stale v1 caches are dropped)
   const key = `ff2:${bLatMin}:${bLatMax}:${bLonMin}:${bLonMax}:${nn}:${ST}`
@@ -577,6 +585,7 @@ export async function fetchForecastField(
       45 * 60_000
     )
     const arr = (Array.isArray(raw) ? raw : [raw]) as Array<{
+      mock_source?: boolean
       hourly?: {
         time?: string[]
         precipitation?: (number | null)[]
@@ -588,6 +597,9 @@ export async function fetchForecastField(
       }
     }>
     for (let k = 0; k < idx.length; k++) {
+      // demo upstream (quota-dead, no cache): count as missing so the field
+      // honestly degrades to synthetic mode instead of faking "real" weather
+      if (arr[k]?.mock_source) continue
       const h = arr[k]?.hourly
       if (!h?.time || h.time.length === 0) continue
       const t = h.time

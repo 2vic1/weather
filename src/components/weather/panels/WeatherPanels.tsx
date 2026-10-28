@@ -168,6 +168,11 @@ function CurrentContent({ data }: { data: WeatherData }) {
           <span className="mt-0.5 text-xs text-muted-foreground">
             احساس واقعی: {faRound(c.apparent_temperature)}°
           </span>
+          {data.demo && (
+            <span className="mt-2 w-fit rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+              داده نمایشی — سرویس واقعی موقتاً در دسترس نیست
+            </span>
+          )}
         </div>
         <WIcon className={cn('h-16 w-16 shrink-0', info.tone)} strokeWidth={1.25} aria-hidden />
       </div>

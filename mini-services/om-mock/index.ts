@@ -392,6 +392,8 @@ function handleForecast(url: URL): Response {
       timezone: tz === 'UTC' ? 'GMT' : tz,
       timezone_abbreviation: tz === 'UTC' ? 'GMT' : 'IRST',
       utc_offset_seconds: tz === 'UTC' ? 0 : 12600,
+      // explicit demo marker — lets the app badge this data as simulated
+      mock_source: true,
     }
 
     if (currentVars.length > 0) {
