@@ -31,23 +31,38 @@ function buildTempLut(): Uint8Array {
   return lut
 }
 
-/** vivid Windy-like precipitation ramp over 0…50 mm/h (sqrt scale) */
+/**
+ * Classic radar spectrum (Windy/rainviewer-style), calibrated to mm/h so the
+ * eye reads intensity directly: light rain = blue → shower = cyan/green →
+ * moderate = green→yellow → heavy = orange → intense = red → extreme =
+ * crimson → magenta → pale pink cores. sqrt scale over 0…45 mm/h.
+ */
+export const PRECIP_MM_STOPS: ReadonlyArray<readonly [number, number, number, number, number]> = [
+  // mm/h, r, g, b, a
+  [0.08, 168, 210, 245, 0.42],
+  [0.25, 118, 180, 242, 0.5],
+  [0.6, 55, 130, 235, 0.56],
+  [1.2, 40, 205, 230, 0.6],
+  [2, 60, 205, 120, 0.64],
+  [3.5, 155, 220, 75, 0.68],
+  [5, 250, 228, 80, 0.72],
+  [7, 250, 180, 50, 0.75],
+  [10, 245, 125, 40, 0.78],
+  [15, 232, 60, 40, 0.81],
+  [24, 190, 30, 65, 0.84],
+  [33, 220, 70, 175, 0.87],
+  [45, 245, 150, 220, 0.9],
+]
+export const PRECIP_MM_MAX = 45
+
+export function precipLutIndex(mm: number): number {
+  return Math.min(255, (Math.sqrt(Math.min(Math.max(mm, 0), PRECIP_MM_MAX) / PRECIP_MM_MAX) * 255) | 0)
+}
+
 function buildPrecipLut(): Uint8Array {
-  const stops: Array<[number, number, number, number, number]> = [
-    // mm, r, g, b, a
-    [0.05, 155, 205, 245, 0.3],
-    [0.2, 105, 185, 240, 0.45],
-    [0.5, 75, 175, 130, 0.55],
-    [1.5, 35, 145, 85, 0.6],
-    [3, 40, 120, 205, 0.65],
-    [7, 55, 190, 220, 0.7],
-    [12, 250, 225, 90, 0.76],
-    [20, 250, 160, 60, 0.8],
-    [35, 235, 65, 55, 0.85],
-    [65, 175, 60, 185, 0.9],
-  ]
+  const stops = PRECIP_MM_STOPS
   const lut = new Uint8Array(256 * 4)
-  const idxOf = (mm: number) => Math.round(Math.sqrt(Math.min(mm, 50) / 50) * 255)
+  const idxOf = (mm: number) => precipLutIndex(mm)
   for (let s = 0; s < stops.length - 1; s++) {
     const [m0, r0, g0, b0, a0] = stops[s]
     const [m1, r1, g1, b1, a1] = stops[s + 1]
@@ -214,7 +229,11 @@ export default function FieldCanvas() {
     const fld = activeField
     const H = st.times.length
     if (H === 0) return
-    const hi = forecastActive ? Math.min(hour, H - 1) : 0
+    // fractional frame → smooth Windy-style morphing between 3-hourly steps
+    const hf = forecastActive ? Math.max(0, Math.min(hour, H - 1)) : 0
+    const hi = Math.floor(hf)
+    const hi1 = Math.min(hi + 1, H - 1)
+    const tf = hf - hi
 
     // grid values, row 0 = north (flipped from south-first storage)
     const vals = new Float32Array(n * n)
@@ -223,7 +242,13 @@ export default function FieldCanvas() {
       for (let j = 0; j < n; j++) {
         const p = pts[i * n + j]
         const arr = fld === 'precip' ? p?.precip : fld === 'temp' ? p?.temp : p?.clouds
-        const v = arr?.[hi] ?? NaN
+        const a0 = arr?.[hi] ?? NaN
+        const a1 = arr?.[hi1] ?? NaN
+        // NaN-aware lerp — partial series never poison a valid frame
+        let v: number
+        if (!Number.isFinite(a0)) v = a1
+        else if (!Number.isFinite(a1)) v = a0
+        else v = a0 + (a1 - a0) * tf
         vals[r * n + j] = Number.isFinite(v) ? v : NaN
       }
     }
@@ -257,11 +282,13 @@ export default function FieldCanvas() {
     const mN = mercY(nw.lat)
     const mS = mercY(se.lat)
 
-    // data bounds in mercator + grid row table (descending, row 0 = north)
-    const mdt = mercY(bounds.latMax)
-    const mdb = mercY(bounds.latMin)
+    // grid rows sit at LINEAR latitudes (server lattice) → map each row to its
+    // true Web-Mercator y so features land pixel-perfect on the basemap
+    const latSpan = bounds.latMax - bounds.latMin
     const mers = new Float64Array(n)
-    for (let r = 0; r < n; r++) mers[r] = mdt - ((mdt - mdb) * r) / (n - 1)
+    for (let r = 0; r < n; r++) {
+      mers[r] = mercY(bounds.latMax - (latSpan * r) / (n - 1)) // row 0 = north
+    }
     const lonMin = bounds.lonMin
     const lonSpan = Math.max(bounds.lonMax - lonMin, 1e-6)
 
@@ -278,7 +305,7 @@ export default function FieldCanvas() {
     if (!octx) return
     const img = octx.createImageData(rw, rh)
     const data = img.data
-    const fadeW = 1.6 // edge fade width in grid cells
+    const fadeW = 3 // soft edge fade — boundary-cut systems dissolve naturally
 
     for (let y = 0; y < rh; y++) {
       const m = mN + (mS - mN) * (y / Math.max(rh - 1, 1))
@@ -332,11 +359,11 @@ export default function FieldCanvas() {
         // value → LUT index
         let li: number
         if (fld === 'precip') {
-          if (v < 0.05) {
+          if (v < 0.08) {
             data[o + 3] = 0
             continue
           }
-          li = Math.min(255, (Math.sqrt(Math.min(v, 50) / 50) * 255) | 0)
+          li = precipLutIndex(v)
         } else if (fld === 'clouds') {
           if (v < 3) {
             data[o + 3] = 0
@@ -372,13 +399,14 @@ export default function FieldCanvas() {
     ctx.textBaseline = 'middle'
     ctx.shadowColor = 'rgba(0,0,0,0.9)'
     ctx.shadowBlur = 4
+    const li0 = Math.min(Math.round(hf), H - 1)
     let labels = 0
     for (let i = 0; i < n && labels < 80; i += step) {
       for (let j = 0; j < n && labels < 80; j += step) {
         const p = pts[i * n + j]
         if (!p) continue
         const arr = fld === 'precip' ? p.precip : p.temp
-        const v = arr?.[hi] ?? NaN
+        const v = arr?.[li0] ?? NaN
         if (!Number.isFinite(v)) continue
         if (fld === 'precip' && v < 0.3) continue
         const pt = map.latLngToContainerPoint([p.lat, p.lon])

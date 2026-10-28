@@ -88,11 +88,13 @@ export default function TimelineControl() {
     }
     if (isForecastMode) {
       if (fc.times.length === 0) return
+      // half-step every 260 ms → each 3-hourly frame morphs into the next
+      // (Windy-grade smooth movement instead of frame jumps)
       tickRef.current = setInterval(() => {
         const s = useWeatherStore.getState()
         const len = getForecastState().times.length
-        if (len > 0) s.setForecastHour((s.forecastHour + 1) % len)
-      }, 300)
+        if (len > 0) s.setForecastHour((s.forecastHour + 0.5) % len)
+      }, 260)
       return () => {
         if (tickRef.current) clearInterval(tickRef.current)
       }
@@ -157,10 +159,10 @@ export default function TimelineControl() {
 
   const satelliteNoFrames = timelineMode === 'satellite' && satFrames.length === 0
 
-  // forecast steps
+  // forecast steps (slider & labels always speak whole frames)
   const fcLen = fc.times.length
   const fcMax = Math.max(fcLen - 1, 0)
-  const fcHour = Math.min(forecastHour, fcMax)
+  const fcHour = Math.round(Math.min(forecastHour, fcMax))
   const fcReady = isForecastMode && fcLen > 0
 
   // unified radar bar: real radar frames (۲ ساعت قبل + کوتاه‌مدت) + مدل تا +۱۵ روز

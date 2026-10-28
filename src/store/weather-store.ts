@@ -133,7 +133,8 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
   forecastField: 'precip',
   setForecastField: (f) => set({ forecastField: f }),
   forecastHour: 0,
-  setForecastHour: (h) => set({ forecastHour: Math.max(0, Math.round(h)) }),
+  // fractional frames are allowed — the renderer morphs between 3-hourly steps
+  setForecastHour: (h) => set({ forecastHour: Math.max(0, Math.min(h, 9999)) }),
 
   timelineMode: 'radar',
   setTimelineMode: (m) => set({ timelineMode: m, radarFuture: false }),

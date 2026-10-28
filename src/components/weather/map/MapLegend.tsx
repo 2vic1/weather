@@ -78,9 +78,9 @@ export default function MapLegend() {
               <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
                 <span>۰٫۱</span>
                 <span>۱</span>
-                <span>۲</span>
-                <span>۶</span>
-                <span>۱۶</span>
+                <span>۳</span>
+                <span>۷</span>
+                <span>۱۵</span>
                 <span>۴۵+</span>
               </div>
             </>

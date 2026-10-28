@@ -15,11 +15,13 @@ export const RADAR_PALETTES: Array<{ id: number; label: string; swatch: string }
   { id: 8, label: 'رنگین‌کمان', swatch: 'linear-gradient(90deg,#2962ff,#00bcd4,#4caf50,#ffeb3b,#ff5722,#d500f9)' },
 ]
 
-/** Model precipitation ramp (mm/h) — mirrors PRECIP_STOPS in ForecastField.tsx
- *  (Windy «Rain accumulation» look: pale → green → blue → yellow → orange →
- *   red → maroon → deep purple) */
+/**
+ * Model precipitation ramp (mm/h) — mirrors PRECIP_MM_STOPS in FieldCanvas.tsx
+ * (classic radar spectrum: light blue → blue → cyan → green → yellow → orange →
+ *  red → crimson → magenta → pale pink; sqrt scale over 0…45 mm/h)
+ */
 export const PRECIP_LEGEND_CSS =
-  'linear-gradient(90deg, rgba(228,246,255,.5) 0%, rgba(178,228,250,.55) 10%, rgba(130,224,148,.6) 20%, rgba(52,198,108,.65) 30%, rgba(45,140,235,.68) 40%, rgba(30,100,215,.7) 50%, rgba(250,226,78,.72) 58%, rgba(250,156,45,.76) 68%, rgba(240,60,45,.8) 78%, rgba(186,34,56,.84) 88%, rgba(134,26,88,.87) 96%, rgba(94,16,108,.9) 100%)'
+  'linear-gradient(90deg, rgba(168,210,245,.42) 4.7%, rgba(118,180,242,.5) 8.2%, rgba(55,130,235,.56) 12.5%, rgba(40,205,230,.6) 16.3%, rgba(60,205,120,.64) 21.1%, rgba(155,220,75,.68) 27.9%, rgba(250,228,80,.72) 33.3%, rgba(250,180,50,.75) 39.4%, rgba(245,125,40,.78) 47.1%, rgba(232,60,40,.81) 57.7%, rgba(190,30,65,.84) 73%, rgba(220,70,175,.87) 85.6%, rgba(245,150,220,.9) 100%)'
 
 export const NASA_DUST_LEGEND_CSS =
   'linear-gradient(90deg,#2c7bb6,#abd9e9,#ffffbf,#fdae61,#d7191c,#7f0000)'
