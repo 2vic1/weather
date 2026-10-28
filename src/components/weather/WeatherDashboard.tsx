@@ -26,9 +26,10 @@ const MapPanel = dynamic(() => import('./map/MapPanel'), {
 
 const IRAN_OVERVIEW = { lat: 32.6, lon: 52.5, zoom: 5 }
 
-/** Floating pill that appears when the map is zoomed into a city / far from Iran —
- *  lets the user return to the general country view without refreshing. */
-function OverviewPill() {
+/** Floating button that appears when the map is zoomed into a city / far from Iran —
+ *  lets the user return to the general country view without refreshing or zooming out.
+ *  variant "pill" = labeled pill for desktop top-center, "fab" = round button for mobile. */
+function OverviewButton({ variant }: { variant: 'pill' | 'fab' }) {
   const mapView = useWeatherStore((s) => s.mapView)
   const flyTo = useWeatherStore((s) => s.flyTo)
 
@@ -39,6 +40,20 @@ function OverviewPill() {
   const focused = mapView.zoom > 6 || distKm > 700
 
   if (!focused) return null
+
+  if (variant === 'fab') {
+    return (
+      <button
+        onClick={() => flyTo(IRAN_OVERVIEW.lat, IRAN_OVERVIEW.lon, IRAN_OVERVIEW.zoom)}
+        className="glass-strong pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full border-amber-400/60 text-amber-300 shadow-lg transition-all active:scale-95"
+        title="بازگشت به نمای کلی ایران"
+        aria-label="بازگشت به نمای کلی ایران"
+      >
+        <LocateFixed className="h-5 w-5" />
+      </button>
+    )
+  }
+
   return (
     <button
       onClick={() => flyTo(IRAN_OVERVIEW.lat, IRAN_OVERVIEW.lon, IRAN_OVERVIEW.zoom)}
@@ -87,7 +102,7 @@ export default function WeatherDashboard() {
           {desktopPanel ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/20 shadow-[0_0_16px] shadow-primary/30">
             <CloudSun className="h-5 w-5 text-primary" />
           </div>
@@ -96,15 +111,17 @@ export default function WeatherDashboard() {
             <div className="text-[10px] text-muted-foreground">سامانه جامع رصد جوّ و هواشناسی</div>
           </div>
           <span
-            className="whitespace-nowrap rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold text-amber-300"
+            className="shrink-0 whitespace-nowrap rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold text-amber-300"
             title="طراحی و ساخت اختصاصی برای عبدالامیر"
           >
             به سفارش عبدالامیر ✨
           </span>
         </div>
 
-        <div className="flex-1" />
-        <CitySearch />
+        <div className="hidden flex-1 sm:block" />
+        <div className="min-w-0 flex-1 sm:flex-none">
+          <CitySearch />
+        </div>
         <div className="hidden items-center gap-1.5 rounded-xl border border-border/50 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground md:flex">
           <Globe2 className="h-3.5 w-3.5 text-amber-300" />
           <TehranClock />
@@ -113,7 +130,7 @@ export default function WeatherDashboard() {
         {/* mobile panel trigger */}
         <button
           onClick={() => setMobilePanelOpen(true)}
-          className="flex h-9 items-center gap-1.5 rounded-xl bg-primary/20 px-3 text-xs font-bold text-primary lg:hidden"
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-primary/20 px-3 text-xs font-bold text-primary lg:hidden"
         >
           <PanelLeftOpen className="h-4 w-4" />
           جزئیات
@@ -134,9 +151,12 @@ export default function WeatherDashboard() {
           </div>
         </div>
 
-        {/* back-to-overview pill — top center of the map */}
-        <div className="pointer-events-none absolute left-1/2 top-3 z-[1000] -translate-x-1/2">
-          <OverviewPill />
+        {/* back-to-overview — labeled pill (desktop, top center) / round button (mobile, above timeline) */}
+        <div className="pointer-events-none absolute left-1/2 top-3 z-[1001] hidden -translate-x-1/2 sm:block">
+          <OverviewButton variant="pill" />
+        </div>
+        <div className="pointer-events-none absolute bottom-24 right-3 z-[1001] sm:hidden">
+          <OverviewButton variant="fab" />
         </div>
 
         {/* timeline bottom center — centered between the side panels on desktop */}

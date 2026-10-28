@@ -84,7 +84,10 @@ export default function LayerSwitcher() {
   const setForecastField = useWeatherStore((s) => s.setForecastField)
   const setPlaying = useWeatherStore((s) => s.setPlaying)
   const flyTo = useWeatherStore((s) => s.flyTo)
-  const [open, setOpen] = useState(true)
+  // start collapsed on phones so the panel doesn't bury the map and controls
+  const [open, setOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth >= 640
+  )
 
   const radarPaletteVisible = (overlays.radar || overlays.tropical) && timelineMode === 'radar'
 
