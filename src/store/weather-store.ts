@@ -63,6 +63,10 @@ interface WeatherStore {
   // timeline (radar/satellite animation)
   timelineMode: TimelineMode
   setTimelineMode: (m: TimelineMode) => void
+  /** radar mode: slider is in the model-forecast zone (beyond the last radar frame) →
+   *  real radar tiles hide and the 15-day model field renders instead */
+  radarFuture: boolean
+  setRadarFuture: (v: boolean) => void
   frames: RainFrame[]
   satFrames: RainFrame[]
   host: string
@@ -132,7 +136,9 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
   setForecastHour: (h) => set({ forecastHour: Math.max(0, Math.round(h)) }),
 
   timelineMode: 'radar',
-  setTimelineMode: (m) => set({ timelineMode: m }),
+  setTimelineMode: (m) => set({ timelineMode: m, radarFuture: false }),
+  radarFuture: false,
+  setRadarFuture: (v) => set({ radarFuture: v }),
   frames: [],
   satFrames: [],
   host: 'https://tilecache.rainviewer.com',

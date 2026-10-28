@@ -95,14 +95,20 @@ export default function FieldCanvas() {
   const forecastOn = useWeatherStore((s) => s.overlays.forecast)
   const tempOn = useWeatherStore((s) => s.overlays.temp)
   const timelineMode = useWeatherStore((s) => s.timelineMode)
+  const radarFuture = useWeatherStore((s) => s.radarFuture)
   const field = useWeatherStore((s) => s.forecastField)
   const hour = useWeatherStore((s) => s.forecastHour)
   const [, setGridTick] = useState(0)
 
-  const forecastActive = forecastOn && timelineMode === 'forecast'
-  const tempActive = tempOn && timelineMode !== 'forecast'
+  // radar mode scrubbing past «اکنون» → the 15-day model field replaces the radar tiles
+  const inModelZone = timelineMode === 'radar' && radarFuture
+  const forecastActive = (forecastOn && timelineMode === 'forecast') || inModelZone
+  const tempActive = tempOn && timelineMode !== 'forecast' && !inModelZone
   const active = forecastActive || tempActive
   const activeField = forecastActive ? field : 'temp'
+  // radar mode prefetches the grid (without rendering) so the unified timeline
+  // can offer the full 15-day range as soon as the user drags beyond «اکنون»
+  const shouldLoad = active || timelineMode === 'radar'
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const drawRef = useRef<() => void>(() => {})
@@ -111,7 +117,7 @@ export default function FieldCanvas() {
 
   // ---- data fetching (padded + snapped bounds → cache friendly) ----
   useEffect(() => {
-    if (!active) return
+    if (!shouldLoad) return
     const fetchBounds = () => {
       const b = map.getBounds()
       const latSpan = b.getNorth() - b.getSouth()
@@ -139,7 +145,7 @@ export default function FieldCanvas() {
       map.off('moveend', onMove)
       if (timer) clearTimeout(timer)
     }
-  }, [active, map])
+  }, [shouldLoad, map])
 
   // ---- canvas lifecycle ----
   useEffect(() => {

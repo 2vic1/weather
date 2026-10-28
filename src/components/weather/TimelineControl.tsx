@@ -49,6 +49,8 @@ export default function TimelineControl() {
   const forecastHour = useWeatherStore((s) => s.forecastHour)
   const setForecastHour = useWeatherStore((s) => s.setForecastHour)
   const forecastField = useWeatherStore((s) => s.forecastField)
+  const radarFuture = useWeatherStore((s) => s.radarFuture)
+  const setRadarFuture = useWeatherStore((s) => s.setRadarFuture)
   const fc = useForecastState()
 
   const [error, setError] = useState(false)
@@ -99,7 +101,25 @@ export default function TimelineControl() {
     tickRef.current = setInterval(() => {
       const s = useWeatherStore.getState()
       if (s.timelineMode === 'radar') {
-        s.setFrameIndex((s.frameIndex + 1) % s.frames.length)
+        const R = s.frames.length
+        const F = getForecastState().times.length
+        if (s.radarFuture) {
+          // playing inside the 15-day model zone → advance, then wrap to the oldest radar frame
+          if (F > 0 && s.forecastHour + 1 < F) s.setForecastHour(s.forecastHour + 1)
+          else {
+            s.setRadarFuture(false)
+            s.setForecastHour(0)
+            s.setFrameIndex(0)
+          }
+        } else if (s.frameIndex + 1 < R) {
+          s.setFrameIndex(s.frameIndex + 1)
+        } else if (F > 0) {
+          // crossed the «اکنون» boundary → seamless hand-off to the model field
+          s.setRadarFuture(true)
+          s.setForecastHour(0)
+        } else {
+          s.setFrameIndex(0)
+        }
       } else if (s.satFrames.length > 0) {
         s.setSatIndex((s.satIndex + 1) % s.satFrames.length)
       }
@@ -143,6 +163,21 @@ export default function TimelineControl() {
   const fcHour = Math.min(forecastHour, fcMax)
   const fcReady = isForecastMode && fcLen > 0
 
+  // unified radar bar: real radar frames (۲ ساعت قبل + کوتاه‌مدت) + مدل تا +۱۵ روز
+  const R = frames.length
+  const unifiedRadar = isRadarMode && fcLen > 0 && R > 0
+  const radarTotal = R + fcLen
+  const radarSliderMax = unifiedRadar ? radarTotal - 1 : Math.max(modeFrames.length - 1, 0)
+  const radarSliderVal = radarFuture
+    ? R + Math.min(fcHour, fcMax)
+    : Math.min(idx, Math.max(modeFrames.length - 1, 0))
+  const inModelZone = isRadarMode && radarFuture
+
+  // safety: model data gone (error) while stuck in the future → back to live radar
+  useEffect(() => {
+    if (inModelZone && fcLen === 0 && fc.error) setRadarFuture(false)
+  }, [inModelZone, fcLen, fc.error, setRadarFuture])
+
   // day ticks + labels for the 15-day bar (Tehran local days)
   const dayTicks: Tick[] = useMemo(() => {
     if (fcLen < 4) return []
@@ -171,6 +206,32 @@ export default function TimelineControl() {
     return ticks
   }, [fc.times, fcLen, fcMax])
 
+  // ticks for the unified radar bar — «اکنون» marker + one tick per future day
+  const radarTicks: Tick[] = useMemo(() => {
+    if (!unifiedRadar || R < 3 || fcLen < 4) return []
+    const wdFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tehran', weekday: 'short' })
+    const dateFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+    const todayKey = dateFmt.format(new Date())
+    const ticks: Tick[] = [{ pct: (R - 1) / (radarTotal - 1), label: 'اکنون' }]
+    let lastKey = ''
+    for (let i = 0; i < fcLen; i++) {
+      const d = new Date(`${fc.times[i]}Z`)
+      if (Number.isNaN(d.getTime())) continue
+      const dateKey = dateFmt.format(d)
+      if (dateKey === lastKey) continue
+      lastKey = dateKey
+      if (dateKey === todayKey) continue // امروز زیر تیک «اکنون» است
+      const wd = wdFmt.format(d)
+      ticks.push({ pct: (R + i) / (radarTotal - 1), label: WD_FA[wd] ?? wd })
+    }
+    return ticks
+  }, [unifiedRadar, R, fcLen, radarTotal, fc.times])
+
   const diffH = fcHour * 3
   const relLabel =
     diffH === 0
@@ -189,21 +250,29 @@ export default function TimelineControl() {
         : fcHour === 0
           ? 'اکنون'
           : faTehranHour(fc.times[fcHour])
-    : modeFrames.length === 0
-      ? error
-        ? 'عدم اتصال به رادار'
-        : satelliteNoFrames
-          ? 'تصویر روزانه GIBS'
-          : 'در حال دریافت...'
-      : frame
-        ? unixToFaTime(frame.time)
-        : '...'
+    : isRadarMode && radarFuture
+      ? fc.error
+        ? 'خطا در دریافت مدل'
+        : fcLen === 0
+          ? 'در حال دریافت میدان ۱۵ روزه...'
+          : faTehranHour(fc.times[fcHour])
+      : modeFrames.length === 0
+        ? error
+          ? 'عدم اتصال به رادار'
+          : satelliteNoFrames
+            ? 'تصویر روزانه GIBS'
+            : 'در حال دریافت...'
+        : frame
+          ? unixToFaTime(frame.time)
+          : '...'
 
   const hintStart = isForecastMode ? 'امروز' : '۲ ساعت قبل'
   const hintEnd = isForecastMode
     ? `+۱۵ روز`
     : isRadarMode
-      ? '۳۰ دقیقه بعد'
+      ? unifiedRadar
+        ? '+۱۵ روز (مدل)'
+        : '۳۰ دقیقه بعد'
       : satelliteNoFrames
         ? 'تصاویر روزانه'
         : '۱۵ دقیقه‌ای زنده'
@@ -265,15 +334,21 @@ export default function TimelineControl() {
         {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 -translate-x-px" />}
       </button>
 
-      {/* jump to now (forecast mode) */}
-      {isForecastMode && fcReady && fcHour > 0 && (
+      {/* jump to now (forecast / radar-model zone) */}
+      {((isForecastMode && fcReady && fcHour > 0) || inModelZone) && (
         <button
           onClick={() => {
             setPlaying(false)
-            setForecastHour(0)
+            if (inModelZone) {
+              setRadarFuture(false)
+              setForecastHour(0)
+              setFrameIndex(lastPastIdx >= 0 ? lastPastIdx : Math.max(modeFrames.length - 1, 0))
+            } else {
+              setForecastHour(0)
+            }
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300 transition-all hover:scale-105 hover:bg-amber-500/30"
-          title="بازگشت به امروز"
+          title="بازگشت به اکنون"
         >
           <Rewind className="h-4 w-4" />
         </button>
@@ -293,6 +368,26 @@ export default function TimelineControl() {
             }}
             ariaLabel="میله زمان پیش‌بینی ۱۵ روزه"
             ariaValueText={`${relLabel} — ${timeLabel}`}
+          />
+        ) : isRadarMode && unifiedRadar ? (
+          <TimeBar
+            value={Math.min(radarSliderVal, radarSliderMax)}
+            max={radarSliderMax}
+            disabled={modeFrames.length === 0}
+            ticks={radarTicks}
+            onChange={(v) => {
+              setPlaying(false)
+              if (v >= R) {
+                // مدل zone → hide radar tiles, render the 15-day model field
+                if (!radarFuture) setRadarFuture(true)
+                setForecastHour(Math.min(v - R, fcMax))
+              } else {
+                if (radarFuture) setRadarFuture(false)
+                setFrameIndex(v)
+              }
+            }}
+            ariaLabel="خط زمانی رادار و پیش‌بینی ۱۵ روزه"
+            ariaValueText={`${inModelZone ? `${relLabel} — ` : ''}${timeLabel}`}
           />
         ) : (
           <TimeBar
@@ -327,12 +422,27 @@ export default function TimelineControl() {
                 به‌روزرسانی...
               </span>
             )}
+            {inModelZone && fcLen > 0 && (
+              <>
+                <span className="ms-1 rounded bg-violet-500/25 px-1 text-[9px] text-violet-300" dir="rtl">
+                  مدل {FIELD_LABEL[forecastField] ?? ''}
+                </span>
+                <span className="ms-1 rounded bg-cyan-500/20 px-1 text-[9px] text-cyan-300" dir="rtl">
+                  {relLabel}
+                </span>
+              </>
+            )}
+            {inModelZone && fc.loading && fcLen === 0 && (
+              <span className="ms-1 rounded bg-amber-500/20 px-1 text-[9px] text-amber-300" dir="rtl">
+                در حال دریافت مدل...
+              </span>
+            )}
             {satelliteNoFrames && (
               <span className="ms-1 rounded bg-cyan-500/20 px-1 text-[9px] text-cyan-300" dir="rtl">
                 NASA GIBS
               </span>
             )}
-            {!isForecastMode && frame?.nowcast && minutesAhead > 0 && (
+            {!isForecastMode && !inModelZone && frame?.nowcast && minutesAhead > 0 && (
               <span className="ms-1 rounded bg-amber-500/20 px-1 text-[9px] text-amber-300" dir="rtl">
                 کوتاه‌مدت
               </span>

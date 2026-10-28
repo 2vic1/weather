@@ -55,7 +55,20 @@ function cloudsColor(cc: number): [number, number, number, number] {
 
 export default function ForecastField() {
   const map = useMap()
-  const active = useWeatherStore((s) => s.overlays.forecast && s.timelineMode === 'forecast')
+  // active in forecast mode (overlay on) — or in radar mode once the slider
+  // crosses beyond the last radar frame into the 15-day model zone
+  const active = useWeatherStore((s) =>
+    s.timelineMode === 'forecast'
+      ? s.overlays.forecast
+      : s.timelineMode === 'radar'
+        ? s.radarFuture
+        : false
+  )
+  // radar mode prefetches the field (without rendering) so the unified radar
+  // timeline can offer the full 15-day range as soon as the user drags past «اکنون»
+  const shouldLoad = useWeatherStore(
+    (s) => active || s.timelineMode === 'radar'
+  )
   const field = useWeatherStore((s) => s.forecastField)
   const hour = useWeatherStore((s) => s.forecastHour)
   const [gridTick, setGridTick] = useState(0)
@@ -63,9 +76,9 @@ export default function ForecastField() {
 
   useEffect(() => subscribeForecast(() => setGridTick((t) => t + 1)), [])
 
-  // fetch field when activated & when the view moves
+  // fetch field when activated (or prefetching for radar mode) & when the view moves
   useEffect(() => {
-    if (!active) return
+    if (!shouldLoad) return
     const fetchBounds = () => {
       const b = map.getBounds()
       requestForecast(
@@ -89,7 +102,7 @@ export default function ForecastField() {
       map.off('moveend', onMove)
       if (timer) clearTimeout(timer)
     }
-  }, [active, map])
+  }, [shouldLoad, map])
 
   // canvas lifecycle + drawing
   useEffect(() => {

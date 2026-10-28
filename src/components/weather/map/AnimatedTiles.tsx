@@ -28,6 +28,7 @@ export default function AnimatedTiles() {
   const frameIndex = useWeatherStore((s) => s.frameIndex)
   const satIndex = useWeatherStore((s) => s.satIndex)
   const timelineMode = useWeatherStore((s) => s.timelineMode)
+  const radarFuture = useWeatherStore((s) => s.radarFuture)
   const radarOn = useWeatherStore((s) => s.overlays.radar)
   const satelliteOn = useWeatherStore((s) => s.overlays.satellite)
   const tropicalOn = useWeatherStore((s) => s.overlays.tropical)
@@ -35,12 +36,13 @@ export default function AnimatedTiles() {
 
   const isRadarMode = timelineMode === 'radar'
   // tropical supersedes plain radar (same product, different palette/settings)
-  // forecast mode renders its own model field on canvas — hide tile overlays
+  // forecast mode renders its own model field on canvas — hide tile overlays.
+  // radar mode in the model zone (beyond the last radar frame) also hides tiles.
   const visible =
     timelineMode === 'forecast'
       ? false
       : isRadarMode
-        ? radarOn || tropicalOn
+        ? !radarFuture && (radarOn || tropicalOn)
         : satelliteOn
 
   const modeList = isRadarMode ? frames : satFrames
