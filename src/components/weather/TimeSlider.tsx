@@ -89,7 +89,12 @@ export default function TimeBar({
       }}
       onPointerUp={(e) => {
         draggingRef.current = false
-        e.currentTarget.releasePointerCapture(e.pointerId)
+        // capture may already be gone (browser cancelled the pointer) — don't crash
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        } catch {
+          /* no active pointer — ignore */
+        }
       }}
       onPointerCancel={() => {
         draggingRef.current = false

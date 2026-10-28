@@ -20,7 +20,9 @@ export interface ForecastState {
   bounds: ForecastBounds | null
   loading: boolean
   error: boolean
+  synthetic: boolean
   fetchedAt: number
+  lastAttempt: number
 }
 
 let state: ForecastState = {
@@ -30,7 +32,9 @@ let state: ForecastState = {
   bounds: null,
   loading: false,
   error: false,
+  synthetic: false,
   fetchedAt: 0,
+  lastAttempt: 0,
 }
 
 let inflight: Promise<void> | null = null
@@ -58,20 +62,32 @@ export function useForecastState(): ForecastState {
 
 function shouldRefetch(b: ForecastBounds): boolean {
   const g = state.bounds
-  if (!g || state.error) return true
+  if (!g) return true
+  const age = Date.now() - state.fetchedAt
+  // the server returns a super-region (view + margin) — reuse it while the
+  // requested view stays comfortably inside and data is fresh
+  if (!state.error && age < 45 * 60_000) {
+    const mLat = (g.latMax - g.latMin) * 0.12
+    const mLon = (g.lonMax - g.lonMin) * 0.12
+    if (
+      b.latMin >= g.latMin - mLat &&
+      b.latMax <= g.latMax + mLat &&
+      b.lonMin >= g.lonMin - mLon &&
+      b.lonMax <= g.lonMax + mLon
+    )
+      return false
+  }
+  // after an error, back off so quota-dead upstream isn’t hammered
+  if (state.error) return Date.now() - state.lastAttempt > 45_000
+  if (Date.now() - state.fetchedAt > 15 * 60_000) return true
+  // view drifted far out of the cached region → need a new region
   const cLat = (b.latMin + b.latMax) / 2
   const cLon = (b.lonMin + b.lonMax) / 2
   const gLat = (g.latMin + g.latMax) / 2
   const gLon = (g.lonMin + g.lonMax) / 2
-  const spanLat = Math.abs(b.latMax - b.latMin)
-  const spanLon = Math.abs(b.lonMax - b.lonMin)
   const gSpanLat = Math.abs(g.latMax - g.latMin)
   const gSpanLon = Math.abs(g.lonMax - g.lonMin)
-  if (Math.abs(cLat - gLat) > spanLat * 0.3 || Math.abs(cLon - gLon) > spanLon * 0.3) return true
-  if (Math.abs(spanLat - gSpanLat) > gSpanLat * 0.5) return true
-  if (Math.abs(spanLon - gSpanLon) > gSpanLon * 0.5) return true
-  // refetch when data is older than 15 min
-  if (Date.now() - state.fetchedAt > 15 * 60_000) return true
+  if (Math.abs(cLat - gLat) > gSpanLat * 0.35 || Math.abs(cLon - gLon) > gSpanLon * 0.35) return true
   return false
 }
 
@@ -87,25 +103,35 @@ export function requestForecast(b: ForecastBounds, res = 20): void {
     res: String(res),
   })
 
-  state = { ...state, loading: true, error: false }
+  state = { ...state, loading: true, error: false, lastAttempt: Date.now() }
   emit()
 
   inflight = fetch(`/api/forecastfield?${params}`)
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-    .then((d: { points: ForecastFieldPoint[]; times: string[]; n: number; bounds: ForecastBounds }) => {
-      state = {
-        points: d.points,
-        times: d.times ?? [],
-        n: d.n,
-        bounds: d.bounds,
-        loading: false,
-        error: false,
-        fetchedAt: Date.now(),
+    .then(
+      (d: {
+        points: ForecastFieldPoint[]
+        times: string[]
+        n: number
+        bounds: ForecastBounds
+        synthetic?: boolean
+      }) => {
+        state = {
+          points: d.points,
+          times: d.times ?? [],
+          n: d.n,
+          bounds: d.bounds,
+          loading: false,
+          error: false,
+          synthetic: Boolean(d.synthetic),
+          fetchedAt: Date.now(),
+          lastAttempt: Date.now(),
+        }
+        emit()
       }
-      emit()
-    })
+    )
     .catch(() => {
-      state = { ...state, loading: false, error: true }
+      state = { ...state, loading: false, error: true, lastAttempt: Date.now() }
       emit()
     })
     .finally(() => {

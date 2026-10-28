@@ -120,7 +120,7 @@ export default function ForecastField() {
           lonMin: b.getWest(),
           lonMax: b.getEast(),
         },
-        28
+        20 // server expands to a super-region lattice (quota-lean) — reuse it
       )
     }
     fetchBounds()

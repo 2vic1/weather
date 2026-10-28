@@ -18,9 +18,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'bounds نامعتبر است' }, { status: 400 })
   }
 
-  // grid side capped at 30 → max 900 points (chunked upstream, Windy-grade smoothness)
-  const size = parseFloat(sp.get('res') ?? '28')
-  const n = Math.min(Math.max(Math.round(size), 8), 30)
+  // grid side capped at 24 → ≤ 576 upstream locations per fetch (quota-safe);
+  // the server expands the view to a super-region so panning reuses one fetch
+  const size = parseFloat(sp.get('res') ?? '20')
+  const n = Math.min(Math.max(Math.round(size), 8), 24)
   const step = Math.min(Math.max(Math.round(parseFloat(sp.get('step') ?? '3')), 1), 6)
 
   try {
@@ -33,8 +34,7 @@ export async function GET(req: NextRequest) {
       step
     )
     return NextResponse.json({
-      ...data,
-      bounds: { latMin, latMax, lonMin, lonMax },
+      ...data, // includes the super-region bounds the grid actually covers
       fetchedAt: new Date().toISOString(),
     })
   } catch (e) {

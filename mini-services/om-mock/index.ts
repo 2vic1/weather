@@ -1,7 +1,11 @@
 // Open-Meteo mock server — deterministic 16-day forecast data for UI testing
-// without burning the real API quota. Enable by starting the app with:
-//   OPEN_METEO_BASE=http://127.0.0.1:4444 bun run dev
+// without burning the real API quota. Used as an automatic fallback when the
+// real upstream is unreachable / quota-dead:
+//   OPEN_METEO_FALLBACK_BASE=http://127.0.0.1:4444
 // Port: 4444 (independent mini service)
+//
+// PERF: series are memoized per (lat, lon, day, needed-vars) and only the
+// requested variable arrays are built — a 100-point chunk answers in < 100 ms.
 
 const PORT = 4444
 const DAYS = 16
@@ -53,15 +57,39 @@ const GH: Record<number, number> = {
 }
 const LEVELS = [1000, 925, 850, 700, 500, 300, 200]
 
+/** 10 m + daily dependencies always built; pressure levels only on demand */
+const BASE_VARS = [
+  'temperature_2m',
+  'relative_humidity_2m',
+  'apparent_temperature',
+  'precipitation',
+  'precipitation_probability',
+  'weather_code',
+  'cloud_cover',
+  'wind_speed_10m',
+  'wind_direction_10m',
+  'wind_gusts_10m',
+  'cape',
+  'lifted_index',
+  'surface_pressure',
+  'pressure_msl',
+  'is_day',
+] as const
+
 interface Series {
   time: string[]
   vals: Record<string, (number | null)[]>
 }
 
-/** build one 16-day hourly series (local stamps for the given tz) */
-function buildSeries(startMs: number, tz: string, lat: number, lon: number): Series {
-  const N = 24 * DAYS
-  const time: string[] = []
+/** build one 16-day hourly series (local stamps provided by the caller) */
+function buildSeries(
+  stamps: string[],
+  lat: number,
+  lon: number,
+  need: Set<string>
+): Series {
+  const N = stamps.length
+  const time = stamps
   const vals: Record<string, (number | null)[]> = {}
   const push = (k: string) => {
     vals[k] = []
@@ -77,44 +105,68 @@ function buildSeries(startMs: number, tz: string, lat: number, lon: number): Ser
   const ws = push('wind_speed_10m')
   const wd = push('wind_direction_10m')
   const gust = push('wind_gusts_10m')
-  const cape = push('cape')
-  const li = push('lifted_index')
-  const sp = push('surface_pressure')
-  const pmsl = push('pressure_msl')
-  const isDay = push('is_day')
 
+  const wantCape = need.has('cape')
+  const wantLi = need.has('lifted_index')
+  const wantSp = need.has('surface_pressure')
+  const wantPmsl = need.has('pressure_msl')
+  const wantIsDay = need.has('is_day')
+  const cape = wantCape ? push('cape') : null
+  const li = wantLi ? push('lifted_index') : null
+  const sp = wantSp ? push('surface_pressure') : null
+  const pmsl = wantPmsl ? push('pressure_msl') : null
+  const isDay = wantIsDay ? push('is_day') : null
+
+  const needLevels = LEVELS.some((L) => need.has(`temperature_${L}hPa`))
   const lv: Record<number, Record<string, (number | null)[]>> = {}
-  for (const L of LEVELS) {
-    lv[L] = {
-      temperature: push(`temperature_${L}hPa`),
-      relative_humidity: push(`relative_humidity_${L}hPa`),
-      wind_speed: push(`wind_speed_${L}hPa`),
-      wind_direction: push(`wind_direction_${L}hPa`),
-      geopotential_height: push(`geopotential_height_${L}hPa`),
+  if (needLevels) {
+    for (const L of LEVELS) {
+      lv[L] = {
+        temperature: push(`temperature_${L}hPa`),
+        relative_humidity: push(`relative_humidity_${L}hPa`),
+        wind_speed: push(`wind_speed_${L}hPa`),
+        wind_direction: push(`wind_direction_${L}hPa`),
+        geopotential_height: push(`geopotential_height_${L}hPa`),
+      }
     }
   }
 
   const latPhase = (lat - 35) * 0.6 + (lon - 51) * 0.15
 
+  // Two travelling synoptic systems (deterministic, Windy-style): a
+  // Mediterranean low sweeping east across Anatolia → Iran over ~13 days,
+  // and an Arabian Sea system pushing north-east during the first week.
+  // Both are functions of (lat, lon, hourIndex) so every point/time sees the
+  // SAME coherent storm track — the map animation shows real motion.
+  const gauss = (clat: number, clon: number, sl: number, so: number) =>
+    Math.exp(-(((lat - clat) / sl) ** 2 + ((lon - clon) / so) ** 2))
+
   for (let i = 0; i < N; i++) {
-    const ms = startMs + i * 3600_000
-    time.push(localStamp(ms, tz))
     const hourLocal = Number(time[i].slice(11, 13))
     const day = Math.floor(i / 24)
+    const dFloat = i / 24
 
-    // two rain events: day 2–3 afternoon/evening, day 8–9 — plus scattered showers
-    const event1 = day >= 2 && day <= 3 && hourLocal >= 13 && hourLocal <= 23
-    const event2 = day >= 8 && day <= 9 && hourLocal >= 15 && hourLocal <= 23
+    // System A — Mediterranean cyclone drifting ENE onto Iran
+    const gA = gauss(33.5 + 0.55 * dFloat, 26 + 2.35 * dFloat, 3.4, 5.2)
+    const pA =
+      9 *
+      Math.max(0, Math.sin((Math.PI * dFloat) / 13)) *
+      (0.55 + 0.45 * Math.sin((2 * Math.PI * i) / 30 + 1.1))
+    // System B — Arabian Sea system pushing north-east (first week)
+    const gB = gauss(12 + 0.75 * dFloat, 57 + 0.5 * dFloat, 3.2, 3.9)
+    const pB =
+      13 *
+      Math.max(0, Math.sin((Math.PI * dFloat) / 9 + 0.5)) *
+      (0.6 + 0.4 * Math.sin((2 * Math.PI * i) / 26))
+
+    // scattered light showers keep the field textured between systems
     const scattered =
       prand(i * 3 + day * 97 + Math.round(latPhase * 10)) > 0.965 ? 0.4 + prand(i) * 1.2 : 0
-    let mm = 0
-    if (event1) mm = 0.8 + 3.5 * Math.sin(((hourLocal - 13) / 11) * Math.PI) + prand(i * 7) * 2
-    if (event2) mm = 1.5 + 5 * Math.sin(((hourLocal - 15) / 9) * Math.PI) + prand(i * 5) * 3
-    mm += scattered
-    precip.push(Math.round(mm * 100) / 100)
+    const mm = Math.round((gA * pA + gB * pB + scattered) * 100) / 100
+    precip.push(mm)
 
     const diurnal = Math.sin(((hourLocal - 14) / 24) * 2 * Math.PI)
-    const t = 16 + 8 * diurnal - (mm > 0.3 ? 3 : 0) - day * 0.15 + latPhase
+    const t = 16 + 8 * diurnal - (mm > 0.3 ? 2.5 * Math.min(mm, 6) / 6 : 0) - day * 0.15 + latPhase
     temp.push(Math.round(t * 10) / 10)
     app.push(Math.round((t - 1.5 - wsBase(i) * 0.12) * 10) / 10)
 
@@ -131,32 +183,57 @@ function buildSeries(startMs: number, tz: string, lat: number, lon: number): Ser
     wd.push(Math.round((232 + 42 * Math.sin(i / 23 + latPhase) + 360) % 360))
     gust.push(Math.round(wsBase(i) * 1.55 + 4))
 
-    const capeV =
-      Math.max(0, Math.sin((i - 52) / 17) ** 2) * (event1 || event2 ? 2600 : 900) +
-      160 +
-      prand(i * 13) * 220
-    cape.push(Math.round(capeV))
-    li.push(Math.round((-capeV / 850) * 10) / 10)
+    if (cape) {
+      const capeV =
+        Math.max(0, Math.sin((i - 52) / 17) ** 2) * (mm > 0.5 ? 2600 : 900) +
+        160 +
+        prand(i * 13) * 220
+      cape.push(Math.round(capeV))
+      if (li) li.push(Math.round((-capeV / 850) * 10) / 10)
+    } else if (li) {
+      li.push(0)
+    }
+    if (sp) sp.push(Math.round(878 + 6 * Math.sin(i / 19)))
+    if (pmsl) pmsl.push(Math.round(1016 + 9 * Math.sin(i / 15 + 2)))
+    if (isDay) isDay.push(hourLocal >= 7 && hourLocal <= 17 ? 1 : 0)
 
-    sp.push(Math.round(878 + 6 * Math.sin(i / 19)))
-    pmsl.push(Math.round(1016 + 9 * Math.sin(i / 15 + 2)))
-    isDay.push(hourLocal >= 7 && hourLocal <= 17 ? 1 : 0)
-
-    for (const L of LEVELS) {
-      const lapseKm = (1000 - L) * 0.0068
-      lv[L].temperature.push(Math.round((t - lapseKm - 1.2 * Math.sin(i / 21)) * 10) / 10)
-      lv[L].relative_humidity.push(
-        Math.round(Math.min(99, Math.max(4, humidity + (L <= 700 ? 14 : -8) + 6 * Math.sin(i / 33))))
-      )
-      lv[L].wind_speed.push(
-        Math.round(Math.min(180, wsBase(i) + (1000 - L) * 0.11 + 5 * Math.sin(i / 13)))
-      )
-      lv[L].wind_direction.push(Math.round((250 + 30 * Math.sin(i / 17) + 360) % 360))
-      lv[L].geopotential_height.push(GH[L] + Math.round(18 * Math.sin(i / 25 + L / 400)))
+    if (needLevels) {
+      for (const L of LEVELS) {
+        const lapseKm = (1000 - L) * 0.0068
+        lv[L].temperature.push(Math.round((t - lapseKm - 1.2 * Math.sin(i / 21)) * 10) / 10)
+        lv[L].relative_humidity.push(
+          Math.round(Math.min(99, Math.max(4, humidity + (L <= 700 ? 14 : -8) + 6 * Math.sin(i / 33))))
+        )
+        lv[L].wind_speed.push(
+          Math.round(Math.min(180, wsBase(i) + (1000 - L) * 0.11 + 5 * Math.sin(i / 13)))
+        )
+        lv[L].wind_direction.push(Math.round((250 + 30 * Math.sin(i / 17) + 360) % 360))
+        lv[L].geopotential_height.push(GH[L] + Math.round(18 * Math.sin(i / 25 + L / 400)))
+      }
     }
   }
 
   return { time, vals }
+}
+
+/** memoized series per (lat, lon, day, need-signature) — mock is deterministic */
+const seriesCache = new Map<string, Series>()
+const SERIES_CACHE_CAP = 900
+
+function getSeries(
+  startMs: number,
+  stamps: string[],
+  lat: number,
+  lon: number,
+  need: Set<string>
+): Series {
+  const key = `${startMs}|${lat.toFixed(2)},${lon.toFixed(2)}|${[...need].sort().join('.')}`
+  const hit = seriesCache.get(key)
+  if (hit) return hit
+  const s = buildSeries(stamps, lat, lon, need)
+  if (seriesCache.size > SERIES_CACHE_CAP) seriesCache.clear()
+  seriesCache.set(key, s)
+  return s
 }
 
 /** daily aggregates derived from the hourly series */
@@ -232,6 +309,25 @@ function startOfDayLocal(tz: string): number {
   return Date.parse(`${dateKey}T00:00:00Z`) - tzOffsetMs(tz)
 }
 
+/** per-request shared stamp cache: same tz + day → identical 384 stamps */
+let stampCache: { key: string; stamps: string[] } | null = null
+
+function getStamps(startMs: number, tz: string): string[] {
+  const key = `${tz}|${startMs}`
+  if (stampCache?.key === key) return stampCache.stamps
+  // one toLocaleString per DAY (16), then hour concatenation — no per-hour Intl
+  const dayKeys: string[] = []
+  for (let d = 0; d < DAYS; d++) {
+    dayKeys.push(localStamp(startMs + d * 86400_000, tz).slice(0, 10))
+  }
+  const stamps: string[] = []
+  for (let d = 0; d < DAYS; d++) {
+    for (let h = 0; h < 24; h++) stamps.push(`${dayKeys[d]}T${pad(h)}:00`)
+  }
+  stampCache = { key, stamps }
+  return stamps
+}
+
 function handleForecast(url: URL): Response {
   const q = url.searchParams
   const lats = (q.get('latitude') ?? '35.7').split(',').map(Number)
@@ -243,11 +339,22 @@ function handleForecast(url: URL): Response {
   const dailyVars = (q.get('daily') ?? '').split(',').filter(Boolean)
   const currentVars = (q.get('current') ?? '').split(',').filter(Boolean)
 
+  // union of everything the series must contain (levels only when asked for)
+  const need = new Set<string>([...hourlyVars, ...currentVars])
+  if (dailyVars.length > 0) {
+    need.add('temperature_2m')
+    need.add('precipitation')
+    need.add('precipitation_probability')
+    need.add('wind_speed_10m')
+  }
+
+  const startMs = startOfDayLocal(tz)
+  const stamps = getStamps(startMs, tz)
+  const nowHour = Math.floor((Date.now() - startMs) / 3600_000)
+
   const out = lats.map((lat, j) => {
     const lon = lons[j] ?? lons[0] ?? 51.4
-    const startMs = startOfDayLocal(tz)
-    const s = buildSeries(startMs, tz, lat, lon)
-    const nowHour = Math.floor((Date.now() - startMs) / 3600_000)
+    const s = getSeries(startMs, stamps, lat, lon, need)
     const curIdx = Math.max(0, Math.min(nowHour, s.time.length - 1))
 
     const obj: Record<string, unknown> = {

@@ -10,6 +10,7 @@
 import { useWeatherStore } from '@/store/weather-store'
 import { RADAR_PALETTES, PRECIP_LEGEND_CSS } from '@/lib/map-legends'
 import { tempColor } from '@/lib/weather-codes'
+import { useForecastState } from './forecastCache'
 
 const FIELD_FA: Record<string, string> = {
   precip: 'بارش (mm/h)',
@@ -25,6 +26,7 @@ export default function MapLegend() {
   const forecastOn = useWeatherStore((s) => s.overlays.forecast)
   const forecastField = useWeatherStore((s) => s.forecastField)
   const radarColor = useWeatherStore((s) => s.radarColor)
+  const fc = useForecastState()
 
   const radarReal = timelineMode === 'radar' && !radarFuture && (radarOn || tropicalOn)
   const modelField =
@@ -110,6 +112,11 @@ export default function MapLegend() {
                 <span>۱۰۰</span>
               </div>
             </>
+          )}
+          {fc.synthetic && (
+            <p className="mt-1 leading-3.5 text-amber-500/90">
+              نمایش آزمایشی — سهمیه مدل عددی موقتاً پر شده؛ به‌زودی داده واقعی برمی‌گردد
+            </p>
           )}
         </>
       )}

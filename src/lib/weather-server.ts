@@ -8,6 +8,34 @@ const UA = 'AsmanNegar/1.0 (weather app)'
 export const OM_BASE = process.env.OPEN_METEO_BASE?.replace(/\/$/, '') || 'https://api.open-meteo.com'
 
 /**
+ * Optional deterministic mock upstream (mini-services/om-mock). Consulted when
+ * the real API is unreachable or quota-dead so the whole app keeps working:
+ *   OPEN_METEO_FALLBACK_BASE=http://127.0.0.1:4444
+ */
+const OM_FALLBACK = process.env.OPEN_METEO_FALLBACK_BASE?.replace(/\/$/, '') || ''
+
+function fallbackUrl(url: string): string | null {
+  if (!OM_FALLBACK || !url.startsWith(OM_BASE)) return null
+  return OM_FALLBACK + url.slice(OM_BASE.length)
+}
+
+/** Error with upstream status + body so callers can react to 429/400 precisely */
+export class UpstreamError extends Error {
+  status: number
+  body: string
+  constructor(status: number, body: string) {
+    super(`Upstream fetch failed: ${status}`)
+    this.status = status
+    this.body = body
+  }
+}
+
+function statusOf(e: unknown): number {
+  const s = e instanceof UpstreamError ? e.status : Number((e as { message?: string })?.message?.match(/(\d{3})/)?.[1] ?? 0)
+  return Number.isFinite(s) ? s : 0
+}
+
+/**
  * IPv4-forced HTTPS GET with JSON parsing.
  * Fallback for sandboxed hosts where the undici global fetch tries a broken
  * IPv6 route first and fails (ETIMEDOUT/ENETUNREACH) even though IPv4 works.
@@ -25,8 +53,11 @@ function https4Get<T>(url: string, timeoutMs = 15000): Promise<T> {
       },
       (res) => {
         if (!res.statusCode || res.statusCode >= 400) {
+          let body = ''
+          res.setEncoding('utf8')
+          res.on('data', (c) => (body += c))
+          res.on('end', () => reject(new UpstreamError(res.statusCode ?? 0, body.slice(0, 300))))
           res.resume()
-          reject(new Error(`Upstream fetch failed: ${res.statusCode ?? '?'}`))
           return
         }
         let body = ''
@@ -49,6 +80,27 @@ function https4Get<T>(url: string, timeoutMs = 15000): Promise<T> {
 const cache = new Map<string, { data: unknown; ts: number }>()
 const STALE_MS = 24 * 3600_000 // serve up to 24h-old data when upstream is unreachable / quota-exhausted
 
+/**
+ * Sandbox hosts with broken IPv6 waste up to 15 s per uncached call on the
+ * doomed global fetch before the IPv4 fallback succeeds. After the first
+ * network failure we skip it entirely for the process lifetime.
+ */
+let prefer4 = false
+
+/**
+ * Circuit breaker for the Open-Meteo daily quota: once a 429 «Daily API
+ * request limit exceeded» is seen, stop hitting upstream for a while so the
+ * app degrades to stale cache / synthetic fallback instead of burning calls.
+ */
+let upstreamDeadUntil = 0
+
+function markUpstreamDead(status: number, body: string): void {
+  if (status === 429 && /daily/i.test(body)) {
+    // retry quietly every 30 min — the quota resets at UTC midnight
+    upstreamDeadUntil = Date.now() + 30 * 60_000
+  }
+}
+
 async function rawFetch<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(15000),
@@ -56,42 +108,75 @@ async function rawFetch<T>(url: string): Promise<T> {
     cache: 'no-store',
   })
   if (!res.ok) {
-    throw new Error(`Upstream fetch failed: ${res.status}`)
+    throw new UpstreamError(res.status, '')
   }
   return (await res.json()) as T
 }
 
+/** one transport attempt with the IPv4-preference memory */
+async function upstreamGet<T>(url: string): Promise<T> {
+  if (prefer4) return https4Get<T>(url)
+  try {
+    return await rawFetch<T>(url)
+  } catch (e1) {
+    if (statusOf(e1) >= 400) throw e1 // HTTP error — transport retry won't help
+    prefer4 = true // network-level failure → remember, go straight to IPv4
+    return https4Get<T>(url)
+  }
+}
+
+const TRANSIENT = new Set([0, 429, 500, 502, 503, 504])
+
+/**
+ * Fetch ladder: fresh cache → real upstream → mock fallback → stale cache.
+ * The quota breaker skips the real upstream entirely while open so a dead
+ * daily quota costs ~2 detection calls per 30 min instead of every request.
+ */
 export async function cachedFetch<T>(key: string, url: string, ttlMs: number): Promise<T> {
   const hit = cache.get(key)
   const now = Date.now()
   if (hit && now - hit.ts < ttlMs) return hit.data as T
 
-  let data: T
-  try {
-    data = await rawFetch<T>(url)
-  } catch {
-    // global fetch failed → IPv4-forced fallback, then one retry after a beat
+  const breakerOpen = now < upstreamDeadUntil
+  if (!breakerOpen) {
     try {
-      data = await https4Get<T>(url)
-    } catch {
-      await new Promise((r) => setTimeout(r, 900))
-      try {
-        data = await https4Get<T>(url)
-      } catch {
-        // upstream unreachable or rate-limited → fall back to stale cache if we have any
+      const data = await upstreamGet<T>(url)
+      cache.set(key, { data, ts: now })
+      return data
+    } catch (e) {
+      const st = statusOf(e)
+      markUpstreamDead(st, e instanceof UpstreamError ? e.body : '')
+      if (!TRANSIENT.has(st)) {
+        // permanent client error (400/404…) — fallback won't behave differently
         if (hit && now - hit.ts < STALE_MS) return hit.data as T
-        throw new Error('upstream unavailable and no cached data')
+        throw e
       }
     }
   }
-  cache.set(key, { data, ts: now })
-  // prune entries older than the stale window
-  if (cache.size > 500) {
-    for (const [k, v] of cache) {
-      if (now - v.ts > STALE_MS) cache.delete(k)
+
+  // quota-dead / network-dead → deterministic mock upstream, then stale cache
+  const fb = fallbackUrl(url)
+  if (fb) {
+    try {
+      // mock is plain http on loopback — global fetch handles it instantly
+      const data = await rawFetch<T>(fb).catch(() => https4Get<T>(fb))
+      cache.set(key, { data, ts: now })
+      pruneCache()
+      return data
+    } catch {
+      /* fall through to stale */
     }
   }
-  return data
+  if (hit && now - hit.ts < STALE_MS) return hit.data as T
+  throw new UpstreamError(breakerOpen ? 429 : 502, 'upstream unavailable and no cached data')
+}
+
+function pruneCache(): void {
+  if (cache.size <= 500) return
+  const now = Date.now()
+  for (const [k, v] of cache) {
+    if (now - v.ts > STALE_MS) cache.delete(k)
+  }
 }
 
 export function round2(n: number): number {
@@ -339,7 +424,7 @@ export async function fetchWindField(
   }
 }
 
-// ===== Dense temperature field (temp heatmap, res up to 25×25) =====
+// ===== Dense temperature field (temp heatmap, lean ≤ 20×20 lattice) =====
 
 export interface TempFieldResult {
   points: Array<{ lat: number; lon: number; temp: number }>
@@ -351,14 +436,16 @@ export async function fetchTempField(
   latMax: number,
   lonMin: number,
   lonMax: number,
-  n = 25
+  n = 20
 ): Promise<TempFieldResult> {
+  // weight = n² upstream calls → cap at 20 (400) to stay under the 600/min burst
+  const nn = Math.min(Math.max(Math.round(n), 8), 20)
   const lats: number[] = []
   const lons: number[] = []
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      lats.push(round2(latMin + ((latMax - latMin) * i) / (n - 1)))
-      lons.push(round2(lonMin + ((lonMax - lonMin) * j) / (n - 1)))
+  for (let i = 0; i < nn; i++) {
+    for (let j = 0; j < nn; j++) {
+      lats.push(round2(latMin + ((latMax - latMin) * i) / (nn - 1)))
+      lons.push(round2(lonMin + ((lonMax - lonMin) * j) / (nn - 1)))
     }
   }
 
@@ -376,23 +463,34 @@ export async function fetchTempField(
       lon: lons[i],
       temp: d?.temperature_2m ?? NaN,
     })),
-    n,
+    n: nn,
   }
 }
 
 // ===== Animated forecast field (precip / temp / clouds grid × time steps) =====
 // 15-day horizon, 3-hourly steps → ~120 frames, like the big weather maps.
+//
+// QUOTA DESIGN (Open-Meteo free tier = 10 000 calls/day, weight = #locations):
+// each fetch covers a SUPER-REGION (view + 50 % margin) on a lean 20–24²
+// lattice → ≤ 576 calls, cached 60 min; clients reuse it for any view inside.
+// Chunked requests run 2-at-a-time with backoff; upstream failures degrade to
+// stale cache and finally to an analytic synthetic field so the map keeps
+// animating instead of showing holes.
 
 export interface ForecastFieldResult {
   times: string[]
   points: Array<{ lat: number; lon: number; precip: number[]; temp: number[]; clouds: number[] }>
   n: number
+  bounds: { latMin: number; latMax: number; lonMin: number; lonMax: number }
+  synthetic: boolean
 }
 
 /** Assembled-result cache (separate from raw URL cache) */
 const ffCache = new Map<string, { data: ForecastFieldResult; ts: number }>()
-const FF_TTL = 30 * 60_000
+const FF_TTL = 60 * 60_000
+const FF_STALE = 8 * 60 * 60_000 // serve up to 8 h old real data when upstream is dead
 const MAX_STEPS = 128
+const FF_CACHE_CAP = 24
 
 /** Snap a coordinate outward to the 0.5° lattice so nearby pans share one cache entry */
 function snapOut(v: number, dir: 'floor' | 'ceil'): number {
@@ -400,26 +498,39 @@ function snapOut(v: number, dir: 'floor' | 'ceil'): number {
   return dir === 'floor' ? (f > v ? f - 0.5 : f) : f < v ? f + 0.5 : f
 }
 
+// `temporal_resolution=hourly_3h` cuts payload 3× and matches the 3 h step;
+// unknown for self-hosted proxies → remembered fallback flag.
+let threeHourOK: boolean | null = null
+
 export async function fetchForecastField(
   latMin: number,
   latMax: number,
   lonMin: number,
   lonMax: number,
-  n = 22,
+  n = 20,
   stepHours = 3
 ): Promise<ForecastFieldResult> {
-  // snap bounds outward to 0.5° → stable cache keys while panning
-  const bLatMin = snapOut(latMin, 'floor')
-  const bLatMax = snapOut(latMax, 'ceil')
-  const bLonMin = snapOut(lonMin, 'floor')
-  const bLonMax = snapOut(lonMax, 'ceil')
+  // super-region: view grown by 50 % of its span on every side, snapped to 0.5°
+  const cLat = (latMin + latMax) / 2
+  const cLon = (lonMin + lonMax) / 2
+  const spanLat = Math.max(Math.abs(latMax - latMin), 12)
+  const spanLon = Math.max(Math.abs(lonMax - lonMin), 15)
+  const bLatMin = snapOut(Math.max(-84, cLat - spanLat * 0.95), 'floor')
+  const bLatMax = snapOut(Math.min(84, cLat + spanLat * 0.95), 'ceil')
+  const bLonMin = snapOut(Math.max(-179, cLon - spanLon * 0.95), 'floor')
+  const bLonMax = snapOut(Math.min(179, cLon + spanLon * 0.95), 'ceil')
 
-  const nn = Math.min(Math.max(Math.round(n), 8), 30)
+  const regionSpanLat = bLatMax - bLatMin
   const ST = Math.min(Math.max(Math.round(stepHours), 1), 6)
+  // weight ≤ 576 calls per fetch, always below the 600/min burst ceiling
+  const nn = Math.min(Math.max(Math.round(regionSpanLat > 40 ? 24 : 20), 10), 24)
 
   const key = `ff:${bLatMin}:${bLatMax}:${bLonMin}:${bLonMax}:${nn}:${ST}`
+  const now0 = Date.now()
   const hit = ffCache.get(key)
-  if (hit && Date.now() - hit.ts < FF_TTL) return hit.data
+  if (hit && now0 - hit.ts < FF_TTL) return hit.data
+
+  const region = { latMin: bLatMin, latMax: bLatMax, lonMin: bLonMin, lonMax: bLonMax }
 
   // build lat/lon lattice (row-major: i = lat from south → north, j = lon west → east)
   const lats: number[] = []
@@ -434,17 +545,12 @@ export async function fetchForecastField(
   const N = lats.length
   const points: ForecastFieldResult['points'] = new Array(N)
   let times: string[] = []
+  let gotReal = false
 
-  const chunkSize = 100 // Open-Meteo allows up to 1000 coords/call — keep URLs compact
-  const chunks: number[][] = []
-  for (let i = 0; i < N; i += chunkSize) {
-    chunks.push(Array.from({ length: Math.min(chunkSize, N - i) }, (_, k) => i + k))
-  }
+  // first frame = current UTC hour (hourly_3h snaps forward to the next step)
+  const cutoff = Math.floor(now0 / 3600_000) * 3600_000
 
-  // hourly arrays start today 00:00 UTC (forecast_days=16) → first frame = current hour
-  const nowKey = new Date().toISOString().slice(0, 13) // "2025-11-14T09"
-
-  const fetchChunk = async (idx: number[]): Promise<void> => {
+  const fetchChunk = async (idx: number[], use3h: boolean): Promise<void> => {
     const params = new URLSearchParams({
       latitude: idx.map((i) => lats[i]).join(','),
       longitude: idx.map((i) => lons[i]).join(','),
@@ -452,8 +558,13 @@ export async function fetchForecastField(
       forecast_days: '16',
       timezone: 'UTC',
     })
+    if (use3h) params.set('temporal_resolution', 'hourly_3h')
     const url = `${OM_BASE}/v1/forecast?${params}`
-    const raw = await cachedFetch<unknown>(`ffr:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`, url, 45 * 60_000)
+    const raw = await cachedFetch<unknown>(
+      `ffr:${use3h ? '3h' : '1h'}:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`,
+      url,
+      45 * 60_000
+    )
     const arr = (Array.isArray(raw) ? raw : [raw]) as Array<{
       hourly?: { time?: string[]; precipitation?: (number | null)[]; temperature_2m?: (number | null)[]; cloud_cover?: (number | null)[] }
     }>
@@ -463,11 +574,12 @@ export async function fetchForecastField(
       const t = h.time
       const val = (a: (number | null)[] | undefined, i: number) => (a && a[i] != null ? a[i] : NaN) as number
 
-      // slice from the current UTC hour, keep every ST-th hour → ~120 steps over 15 days
-      let start = t.findIndex((x) => x.slice(0, 13) === nowKey)
+      // slice from the current hour (or next available step), every ST-th hour
+      let start = t.findIndex((x) => Date.parse(`${x}Z`) >= cutoff)
       if (start < 0) start = 0
       const sel: number[] = []
       for (let i = start; i < t.length && sel.length < MAX_STEPS; i += ST) sel.push(i)
+      if (sel.length === 0) continue
 
       const sub = (a: (number | null)[] | undefined, round: (v: number) => number) =>
         sel.map((i) => round(val(a, i)))
@@ -479,11 +591,44 @@ export async function fetchForecastField(
         temp: sub(h.temperature_2m, (v) => Math.round(v * 10) / 10),
         clouds: sub(h.cloud_cover, (v) => Math.round(v)),
       }
-      if (sel.length > times.length) times = sel.map((i) => t[i])
+      if (!times.length) times = sel.map((i) => t[i])
     }
   }
 
-  await Promise.all(chunks.map((c) => fetchChunk(c).catch(() => {})))
+  // chunk runner: 2 concurrent workers, ≤3 attempts each (400 on the 3 h param
+  // is retried once without it; 429/network back off 1.4 s, 4.2 s)
+  const chunkSize = 100
+  const chunks: number[][] = []
+  for (let i = 0; i < N; i += chunkSize) {
+    chunks.push(Array.from({ length: Math.min(chunkSize, N - i) }, (_, k) => i + k))
+  }
+  const runChunk = async (idx: number[]): Promise<void> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await fetchChunk(idx, threeHourOK !== false)
+        return
+      } catch (e) {
+        const st = statusOf(e)
+        if (st === 400 && threeHourOK !== false) {
+          threeHourOK = false // upstream rejected the 3 h resolution — plain hourly then
+          continue
+        }
+        if (attempt === 2) return
+        await new Promise((r) => setTimeout(r, 1400 * (attempt + 1)))
+      }
+    }
+  }
+  let cursor = 0
+  await Promise.all(
+    Array.from({ length: Math.min(2, chunks.length) }, async () => {
+      while (cursor < chunks.length) {
+        const c = chunks[cursor++]
+        await runChunk(c)
+      }
+    })
+  )
+
+  for (let i = 0; i < N; i++) if (points[i]) gotReal = true
 
   // fill any missing points with NaN series so grid stays aligned
   const nan = times.map(() => NaN)
@@ -493,11 +638,88 @@ export async function fetchForecastField(
     }
   }
 
-  const data: ForecastFieldResult = { times, points, n: nn }
+  // degrade gracefully: stale real data → analytic synthetic field
+  let data: ForecastFieldResult
+  if (gotReal && times.length > 0) {
+    data = { times, points, n: nn, bounds: region, synthetic: false }
+  } else if (hit && now0 - hit.ts < FF_STALE) {
+    return hit.data
+  } else {
+    data = buildSyntheticField(lats, lons, ST, nn, region)
+  }
+
   ffCache.set(key, { data, ts: Date.now() })
-  if (ffCache.size > 40) {
+  if (ffCache.size > FF_CACHE_CAP) {
     const now = Date.now()
     for (const [k, v] of ffCache) if (now - v.ts > FF_TTL) ffCache.delete(k)
   }
   return data
+}
+
+// ===== Synthetic fallback field (quota-dead / upstream-dead demo mode) =====
+// Analytic, deterministic moving systems — Mediterranean cyclone drifting east
+// over Anatolia → Iran, an Arabian Sea system pushing north-east, plus diurnal
+// convective showers over the plateau. A function of (lat, lon, t) so every
+// region/pan shows a consistent, physically plausible animation.
+
+function buildSyntheticField(
+  lats: number[],
+  lons: number[],
+  ST: number,
+  nn: number,
+  region: ForecastFieldResult['bounds']
+): ForecastFieldResult {
+  const startMs = Math.floor(Date.now() / (ST * 3600_000)) * ST * 3600_000
+  const steps = Math.min(MAX_STEPS, 121)
+  const times: string[] = []
+  for (let s = 0; s < steps; s++) {
+    times.push(new Date(startMs + s * ST * 3600_000).toISOString().slice(0, 13) + ':00')
+  }
+
+  const points = lats.map((lat, idx) => {
+    const lon = lons[idx]
+    const precip: number[] = []
+    const temp: number[] = []
+    const clouds: number[] = []
+    for (let s = 0; s < steps; s++) {
+      const hUTC = (s * ST) / 24 // days since start
+      const hrs = s * ST
+      // System A — Mediterranean low sweeping east onto Iran
+      const aLat = 33.5 + 0.55 * hUTC
+      const aLon = 26 + 2.35 * hUTC
+      const gA = Math.exp(-(((lat - aLat) / 3.4) ** 2 + ((lon - aLon) / 5.2) ** 2))
+      const pA = 9 * Math.max(0, Math.sin((Math.PI * hUTC) / 13)) * (0.55 + 0.45 * Math.sin((2 * Math.PI * hrs) / 30 + 1.1))
+      // System B — Arabian Sea system pushing north-east
+      const bLat = 12 + 0.75 * hUTC
+      const bLon = 57 + 0.5 * hUTC
+      const gB = Math.exp(-(((lat - bLat) / 3.2) ** 2 + ((lon - bLon) / 3.9) ** 2))
+      const pB = 13 * Math.max(0, Math.sin((Math.PI * hUTC) / 9 + 0.5)) * (0.6 + 0.4 * Math.sin((2 * Math.PI * hrs) / 26))
+      // Diurnal convection over the 22–38 N interior (peaks ~13 UTC ≈ 16:30 Tehran)
+      const convAmp = 1.1 * Math.exp(-(((lat - 30) / 9) ** 2))
+      const hLocal = (13 + (hrs % 24) + 24) % 24
+      const wobble = 0.6 + 0.4 * Math.sin(lon * 12.9898 + lat * 78.233 + s * 6.13)
+      const conv = convAmp * Math.max(0, Math.sin((Math.PI * hLocal) / 12 - Math.PI / 6)) ** 2 * wobble
+
+      let p = gA * pA + gB * pB + conv
+      p = Math.max(0, Math.round(Math.min(p, 80) * 100) / 100)
+
+      const cl = Math.min(
+        100,
+        Math.round(92 * Math.min(1, (gA * pA) / 6) + 92 * Math.min(1, (gB * pB) / 6) + 34 * (conv / 1.1) + 10 * (0.5 + 0.5 * Math.sin(lon / 9 + lat / 7 + hUTC)))
+      )
+      const hDay = (hrs + 3.5) % 24 // Iran-ish local hour
+      const t =
+        33.5 -
+        0.62 * lat +
+        5.5 * Math.sin((2 * Math.PI * (hDay - 14.5)) / 24) * (1 - 0.55 * (cl / 100)) -
+        2.2 * Math.min(p, 5) / 5
+
+      precip.push(p)
+      clouds.push(cl)
+      temp.push(Math.round(t * 10) / 10)
+    }
+    return { lat, lon, precip, temp, clouds }
+  })
+
+  return { times, points, n: nn, bounds: region, synthetic: true }
 }
