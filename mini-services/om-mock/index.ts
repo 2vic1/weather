@@ -257,6 +257,10 @@ function buildDaily(s: Series, startMs: number, tz: string) {
   const pmax: number[] = []
   const wmax: number[] = []
   const uv: number[] = []
+  const phours: number[] = []
+  const gmax: number[] = []
+  const wdir: number[] = []
+  const snowSum: number[] = []
   for (let d = 0; d < DAYS; d++) {
     const ms = startMs + d * 86400_000
     const dateKey = localStamp(ms, tz).slice(0, 10)
@@ -266,14 +270,25 @@ function buildDaily(s: Series, startMs: number, tz: string) {
     const mn = Math.min(...slice)
     tmax.push(Math.round(mx * 10) / 10)
     tmin.push(Math.round(mn * 10) / 10)
-    const mmSum = (s.vals.precipitation.slice(d * 24, d * 24 + 24) as (number | null)[]).reduce(
-      (a, b) => a + (b ?? 0),
-      0
-    )
+    const pr = s.vals.precipitation.slice(d * 24, d * 24 + 24) as (number | null)[]
+    const mmSum = pr.reduce((a, b) => a + (b ?? 0), 0)
     psum.push(Math.round(mmSum * 100) / 100)
     pmax.push(Math.max(...(s.vals.precipitation_probability.slice(d * 24, d * 24 + 24) as number[])))
-    wmax.push(Math.max(...(s.vals.wind_speed_10m.slice(d * 24, d * 24 + 24) as number[])))
-    weather_code.push(mmSum > 8 ? 65 : mmSum > 3 ? 63 : mmSum > 0.4 ? 61 : 2)
+    const wsSlice = s.vals.wind_speed_10m.slice(d * 24, d * 24 + 24) as number[]
+    wmax.push(Math.max(...wsSlice))
+    phours.push(pr.filter((v) => (v ?? 0) > 0.1).length)
+    const guSlice = (s.vals.wind_gusts_10m.slice(d * 24, d * 24 + 24) ?? []).filter(
+      (v) => v != null
+    ) as number[]
+    gmax.push(
+      Math.round(guSlice.length ? Math.max(...guSlice) : Math.max(...wsSlice) * 1.45)
+    )
+    const wdSlice = (s.vals.wind_direction_10m.slice(d * 24, d * 24 + 24) ?? []).filter(
+      (v) => v != null
+    ) as number[]
+    wdir.push(wdSlice.length ? Math.round(wdSlice.reduce((a, b) => a + b, 0) / wdSlice.length) : 225)
+    snowSum.push(mn < 1.5 && mmSum > 0.3 ? Math.round(mmSum * 0.7 * 100) / 100 : 0)
+    weather_code.push(mmSum > 8 ? (mn < 1.5 ? 73 : 65) : mmSum > 3 ? (mn < 1.5 ? 71 : 63) : mmSum > 0.4 ? 61 : 2)
     sunrise.push(`${dateKey}T06:${pad(38 + (d % 3))}`)
     sunset.push(`${dateKey}T17:${pad(12 + (d % 7))}`)
     uv.push(4 + Math.round(3 * Math.abs(Math.sin(d / 4))))
@@ -287,7 +302,11 @@ function buildDaily(s: Series, startMs: number, tz: string) {
     sunset,
     precipitation_sum: psum,
     precipitation_probability_max: pmax,
+    precipitation_hours: phours,
     wind_speed_10m_max: wmax,
+    wind_gusts_10m_max: gmax,
+    wind_direction_10m_dominant: wdir,
+    snowfall_sum: snowSum,
     uv_index_max: uv,
   }
 }

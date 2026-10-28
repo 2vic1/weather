@@ -165,6 +165,38 @@ function mercY(lat: number): number {
   return Math.log(Math.tan(Math.PI / 4 + (l * Math.PI) / 360))
 }
 
+/** rounded capsule path for map pills */
+function capsulePath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const r = h / 2
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+}
+
+// city dot list for on-map mm labels (fetched once per session)
+let CITY_LIST: Array<{ lat: number; lon: number; name: string; isCapital: boolean }> | null = null
+let citiesRequested = false
+function ensureCities(redraw: () => void): void {
+  if (CITY_LIST || citiesRequested) return
+  citiesRequested = true
+  fetch('/api/cities?all=1')
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error('cities fetch failed'))))
+    .then((d: { cities?: Array<{ lat: number; lon: number; name: string; isCapital?: boolean }> }) => {
+      CITY_LIST = (d.cities ?? []).map((c) => ({
+        lat: c.lat,
+        lon: c.lon,
+        name: c.name,
+        isCapital: !!c.isCapital,
+      }))
+      redraw()
+    })
+    .catch(() => {})
+}
+
 /* ================= component ================= */
 
 export default function FieldCanvas() {
@@ -486,55 +518,245 @@ export default function FieldCanvas() {
     ctx.drawImage(off, 0, 0, w, h)
 
     // ---- value labels ----
+    // temperature keeps dense grid numbers; precip / cape / snow get Windy-style
+    // system annotation instead of scattered numbers: a pill on every system's
+    // core (with its spectrum colour as a dot — the legend lives on the map), a
+    // lighter periphery pill on the big systems, and mm pills over cities that
+    // sit under the precip field.
     const zoom = map.getZoom()
     if (fld === 'clouds') return
-    const step = zoom < 5 ? 5 : zoom < 6 ? 4 : zoom < 7 ? 3 : zoom < 9 ? 2 : 1
-    ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.shadowColor = 'rgba(0,0,0,0.9)'
-    ctx.shadowBlur = 4
-    const li0 = Math.min(Math.round(hf), H - 1)
-    let labels = 0
-    for (let i = 0; i < n && labels < 80; i += step) {
-      for (let j = 0; j < n && labels < 80; j += step) {
-        const p = pts[i * n + j]
-        if (!p) continue
-        const arr =
-          fld === 'precip' ? p.precip : fld === 'cape' ? p.cape : fld === 'snow' ? p.snow : p.temp
-        const v = arr?.[li0] ?? NaN
-        if (!Number.isFinite(v)) continue
-        if (fld === 'precip' && v < 0.3) continue
-        if (fld === 'cape' && v < 250) continue
-        if (fld === 'snow' && v < 0.05) continue
-        const pt = map.latLngToContainerPoint([p.lat, p.lon])
-        if (pt.x < 14 || pt.x > w - 14 || pt.y < 14 || pt.y > h - 14) continue
-        const label =
-          fld === 'precip'
-            ? faNum(v, 1)
-            : fld === 'cape'
-              ? faNum(Math.round(v))
-              : fld === 'snow'
-                ? faNum(v, 1)
-                : `${faNum(Math.round(v))}°`
-        ctx.fillStyle = fld === 'precip' && v >= 4 ? 'rgba(255,255,255,0.98)' : 'rgba(255,255,255,0.94)'
-        ctx.fillText(label, pt.x, pt.y)
-        if (fld === 'precip' && v >= 0.3) {
-          ctx.fillStyle = 'rgba(255,255,255,0.65)'
-          ctx.font = '500 8px Vazirmatn, Tahoma, sans-serif'
-          ctx.fillText('mm', pt.x, pt.y + 9)
-          ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
+
+    if (fld === 'temp') {
+      const step = zoom < 5 ? 5 : zoom < 6 ? 4 : zoom < 7 ? 3 : zoom < 9 ? 2 : 1
+      ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
+      ctx.shadowColor = 'rgba(0,0,0,0.9)'
+      ctx.shadowBlur = 4
+      const liT = Math.min(Math.round(hf), H - 1)
+      let labels = 0
+      for (let i = 0; i < n && labels < 80; i += step) {
+        for (let j = 0; j < n && labels < 80; j += step) {
+          const p = pts[i * n + j]
+          if (!p) continue
+          const v = p.temp?.[liT] ?? NaN
+          if (!Number.isFinite(v)) continue
+          const pt = map.latLngToContainerPoint([p.lat, p.lon])
+          if (pt.x < 14 || pt.x > w - 14 || pt.y < 14 || pt.y > h - 14) continue
+          ctx.fillStyle = 'rgba(255,255,255,0.94)'
+          ctx.fillText(`${faNum(Math.round(v))}°`, pt.x, pt.y)
+          labels++
         }
-        if (fld === 'cape' && v >= 250) {
-          ctx.fillStyle = 'rgba(255,255,255,0.6)'
-          ctx.font = '500 8px Vazirmatn, Tahoma, sans-serif'
-          ctx.fillText('J/kg', pt.x, pt.y + 9)
-          ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
+      }
+      ctx.shadowBlur = 0
+    } else {
+      const minV = fld === 'precip' ? 1 : fld === 'cape' ? 350 : 0.08 // core threshold
+      const visV = fld === 'precip' ? 0.6 : fld === 'cape' ? 150 : 0.02 // visible extent
+
+      const latOf = (r: number) => bounds.latMax - (latSpan * r) / (n - 1)
+      const lonOf = (c: number) => lonMin + (lonSpan * c) / (n - 1)
+      const sxy = (r: number, c: number): [number, number] => {
+        const pt = map.latLngToContainerPoint([latOf(r), lonOf(c)])
+        return [pt.x, pt.y]
+      }
+      const lutIdx = (v: number): number =>
+        fld === 'precip'
+          ? precipLutIndex(v)
+          : fld === 'cape'
+            ? Math.min(255, (Math.sqrt(Math.min(v, 5000) / 5000) * 255) | 0)
+            : Math.min(255, (Math.sqrt(Math.min(v, 2) / 2) * 255) | 0)
+      const dotColor = (v: number): string => {
+        const li = lutIdx(v) * 4
+        return `rgb(${lut[li]},${lut[li + 1]},${lut[li + 2]})`
+      }
+      const fmtVal = (v: number): string =>
+        fld === 'precip'
+          ? `${faNum(v, v < 10 ? 1 : 0)}mm`
+          : fld === 'cape'
+            ? `${faNum(Math.round(v))}J`
+            : `${faNum(v, v < 0.1 ? 2 : 1)}cm`
+
+      const pill = (x: number, y: number, text: string, dot: string | null, big: boolean) => {
+        ctx.font = big
+          ? '700 12px Vazirmatn, Tahoma, sans-serif'
+          : '600 10.5px Vazirmatn, Tahoma, sans-serif'
+        const tw = ctx.measureText(text).width
+        const padX = big ? 8 : 6
+        const bh = big ? 20 : 17
+        const bw = tw + padX * 2 + (dot ? 13 : 0)
+        const bx = x - bw / 2
+        const by = y - bh / 2
+        ctx.shadowColor = 'rgba(0,0,0,0.55)'
+        ctx.shadowBlur = 5
+        ctx.fillStyle = 'rgba(9,14,24,0.78)'
+        capsulePath(ctx, bx, by, bw, bh)
+        ctx.fill()
+        ctx.shadowBlur = 0
+        ctx.strokeStyle = 'rgba(255,255,255,0.22)'
+        ctx.lineWidth = 1
+        capsulePath(ctx, bx, by, bw, bh)
+        ctx.stroke()
+        let tx = x
+        if (dot) {
+          const dx = bx + padX + 3.2
+          ctx.fillStyle = dot
+          ctx.beginPath()
+          ctx.arc(dx, y, 3.4, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+          ctx.stroke()
+          tx += 6.5
         }
-        labels++
+        ctx.fillStyle = 'rgba(255,255,255,0.97)'
+        ctx.fillText(text, tx, y + 0.5)
+      }
+
+      // local maxima = system cores (8-neighbour plateau-aware)
+      const peaks: Array<{ r: number; c: number; v: number }> = []
+      for (let r = 1; r < n - 1; r++) {
+        for (let c = 1; c < n - 1; c++) {
+          const v = vals[r * n + c]
+          if (!Number.isFinite(v) || v < minV) continue
+          if (
+            v >= vals[(r - 1) * n + c - 1] &&
+            v >= vals[(r - 1) * n + c] &&
+            v >= vals[(r - 1) * n + c + 1] &&
+            v >= vals[r * n + c - 1] &&
+            v >= vals[r * n + c + 1] &&
+            v >= vals[(r + 1) * n + c - 1] &&
+            v >= vals[(r + 1) * n + c] &&
+            v >= vals[(r + 1) * n + c + 1]
+          ) {
+            peaks.push({ r, c, v })
+          }
+        }
+      }
+      peaks.sort((a, b) => b.v - a.v)
+
+      const coreDist = zoom < 5 ? 92 : zoom < 7 ? 115 : 140
+      const cores: Array<{ x: number; y: number; v: number; r: number; c: number }> = []
+      for (const pk of peaks) {
+        if (cores.length >= 7) break
+        const [x, y] = sxy(pk.r, pk.c)
+        if (x < 36 || x > w - 36 || y < 28 || y > h - 36) continue
+        if (cores.some((q) => Math.hypot(q.x - x, q.y - y) < coreDist)) continue
+        cores.push({ x, y, v: pk.v, r: pk.r, c: pk.c })
+      }
+      const placed: Array<{ x: number; y: number }> = cores.map((q) => ({ x: q.x, y: q.y }))
+      for (const q of cores) pill(q.x, q.y, fmtVal(q.v), dotColor(q.v), true)
+
+      // periphery pill on the 3 strongest systems — teaches «yellow = X mm, blue = Y mm»
+      for (let k = 0; k < Math.min(3, cores.length); k++) {
+        const q = cores[k]
+        const seen = new Uint8Array(n * n)
+        const stack: number[] = [q.r * n + q.c]
+        seen[stack[0]] = 1
+        const target = q.v * 0.45
+        let best = -1
+        let bestScore = Infinity
+        while (stack.length) {
+          const idx = stack.pop() as number
+          const v = vals[idx]
+          if (!Number.isFinite(v) || v < visV) continue
+          const r = (idx / n) | 0
+          const c = idx % n
+          if (v >= target * 0.65 && v <= target * 1.5) {
+            const [x, y] = sxy(r, c)
+            const dCore = Math.hypot(q.x - x, q.y - y)
+            if (dCore > 58) {
+              const score = Math.abs(v - target) + Math.abs(dCore - 115) * 0.004
+              if (score < bestScore) {
+                bestScore = score
+                best = idx
+              }
+            }
+          }
+          const nb = [idx - 1, idx + 1, idx - n, idx + n]
+          for (const ni of nb) {
+            if (ni < 0 || ni >= n * n || seen[ni]) continue
+            if (c === 0 && ni % n === n - 1) continue
+            if (c === n - 1 && ni % n === 0) continue
+            seen[ni] = 1
+            stack.push(ni)
+          }
+        }
+        if (best >= 0) {
+          const r = (best / n) | 0
+          const c = best % n
+          const [x, y] = sxy(r, c)
+          if (
+            x > 30 &&
+            x < w - 30 &&
+            y > 24 &&
+            y < h - 30 &&
+            !placed.some((p2) => Math.hypot(p2.x - x, p2.y - y) < 74)
+          ) {
+            placed.push({ x, y })
+            pill(x, y, fmtVal(vals[best]), dotColor(vals[best]), false)
+          }
+        }
+      }
+
+      // city pills — mm value sampled from the grid over each rainy city
+      if (fld === 'precip') {
+        if (!CITY_LIST) ensureCities(() => drawRef.current())
+        else {
+          const sampled = (lat: number, lon: number): number => {
+            const fx = ((((lon + 540) % 360) - 180 - lonMin) / lonSpan) * (n - 1)
+            if (fx < 0 || fx > n - 1) return NaN
+            const m = mercY(lat)
+            if (m > mers[0] || m < mers[n - 1]) return NaN
+            let lo = 0
+            let hiI = n - 1
+            while (hiI - lo > 1) {
+              const mid = (lo + hiI) >> 1
+              if (m <= mers[mid]) lo = mid
+              else hiI = mid
+            }
+            const fy = lo + (mers[lo] - m) / (mers[lo] - mers[hiI])
+            const iy = Math.min(Math.floor(fy), n - 2)
+            const ty = Math.max(0, Math.min(fy - iy, 1))
+            const ix = Math.min(Math.floor(fx), n - 2)
+            const tx = Math.max(0, Math.min(fx - ix, 1))
+            const v00 = vals[iy * n + ix]
+            const v10 = vals[iy * n + ix + 1]
+            const v01 = vals[(iy + 1) * n + ix]
+            const v11 = vals[(iy + 1) * n + ix + 1]
+            if (![v00, v10, v01, v11].every(Number.isFinite)) return NaN
+            const top = v00 + (v10 - v00) * tx
+            const bot = v01 + (v11 - v01) * tx
+            return top + (bot - top) * ty
+          }
+          const cands: Array<{ x: number; y: number; v: number; name: string; isCapital: boolean }> = []
+          for (const ct of CITY_LIST) {
+            const v = sampled(ct.lat, ct.lon)
+            if (!Number.isFinite(v) || v < 1) continue
+            const pt = map.latLngToContainerPoint([ct.lat, ct.lon])
+            if (pt.x < 20 || pt.x > w - 20 || pt.y < 26 || pt.y > h - 30) continue
+            cands.push({ x: pt.x, y: pt.y, v, name: ct.name, isCapital: ct.isCapital })
+          }
+          cands.sort((a, b) => b.v - a.v)
+          let cityLabels = 0
+          for (const cd of cands) {
+            if (cityLabels >= 12) break
+            if (placed.some((p2) => Math.hypot(p2.x - cd.x, p2.y - cd.y) < 60)) continue
+            placed.push({ x: cd.x, y: cd.y + 13 })
+            pill(cd.x, cd.y + 13, fmtVal(cd.v), null, false)
+            // city name above the dot — replaces the tooltip that sits under
+            // the field canvas (capitals from zoom 5, all cities from zoom 8)
+            if (zoom >= (cd.isCapital ? 5 : 8)) {
+              ctx.font = '600 9.5px Vazirmatn, Tahoma, sans-serif'
+              ctx.shadowColor = 'rgba(0,0,0,0.9)'
+              ctx.shadowBlur = 3
+              ctx.fillStyle = 'rgba(255,255,255,0.88)'
+              ctx.fillText(cd.name, cd.x, cd.y - 9)
+              ctx.shadowBlur = 0
+            }
+            cityLabels++
+          }
+        }
       }
     }
-    ctx.shadowBlur = 0
 
     // ---- isobars (MSL pressure contours, Windy-style) ----
     if (showIsobars && pts[0]?.press) {

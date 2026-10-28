@@ -9,7 +9,6 @@ import CitySearch from './CitySearch'
 import LayerSwitcher from './LayerSwitcher'
 import RegionJump from './RegionJump'
 import TimelineControl from './TimelineControl'
-import MapLegend from './map/MapLegend'
 import SidebarContent from './SidebarContent'
 import { faNum } from '@/lib/format'
 
@@ -168,9 +167,6 @@ export default function WeatherDashboard() {
         >
           <TimelineControl />
         </div>
-
-        {/* on-map legend — explains radar (measured) vs model (forecast) colors */}
-        <MapLegend />
 
         {/* desktop sidebar (right side in RTL) */}
         {desktopPanel && (

@@ -32,10 +32,7 @@ import { tempColor } from '@/lib/weather-codes'
 import { aqColor, aqLabel, capeColor, capeLabel } from '@/lib/analysis-scale'
 import {
   RADAR_PALETTES as PALETTES,
-  PRECIP_LEGEND_CSS,
   NASA_DUST_LEGEND_CSS as DUST_LEGEND_CSS,
-  CAPE_LEGEND_CSS,
-  SNOW_LEGEND_CSS,
 } from '@/lib/map-legends'
 
 const BASES: Array<{ id: BaseLayerId; label: string; icon: typeof Moon }> = [
@@ -257,82 +254,8 @@ export default function LayerSwitcher() {
                 />
               </button>
 
-              {forecastField === 'precip' && (
-                <div className="mt-2">
-                  <div className="mb-1 text-[9px] text-muted-foreground">شدت بارش (mm/h)</div>
-                  <div className="h-2 w-full rounded-full" style={{ background: PRECIP_LEGEND_CSS }} />
-                  <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
-                    <span>۰٫۱</span>
-                    <span>۱</span>
-                    <span>۳</span>
-                    <span>۷</span>
-                    <span>۱۵</span>
-                    <span>۴۵+</span>
-                  </div>
-                </div>
-              )}
-              {forecastField === 'temp' && (
-                <div className="mt-2">
-                  <div className="mb-1 text-[9px] text-muted-foreground">دمای ۲ متری (°C)</div>
-                  <div
-                    className="h-2 w-full rounded-full"
-                    style={{
-                      background: `linear-gradient(to left, rgb(${tempColor(-15).join(',')}), rgb(${tempColor(0).join(',')}), rgb(${tempColor(10).join(',')}), rgb(${tempColor(20).join(',')}), rgb(${tempColor(30).join(',')}), rgb(${tempColor(42).join(',')}))`,
-                    }}
-                  />
-                  <div className="flex justify-between text-[8px] text-muted-foreground" dir="ltr">
-                    <span>-۱۵</span>
-                    <span>۰</span>
-                    <span>۱۰</span>
-                    <span>۲۰</span>
-                    <span>۳۰</span>
-                    <span>+۴۲</span>
-                  </div>
-                </div>
-              )}
-              {forecastField === 'clouds' && (
-                <div className="mt-2">
-                  <div className="mb-1 text-[9px] text-muted-foreground">پوشش ابر (٪)</div>
-                  <div className="h-2 w-full rounded-full bg-gradient-to-l from-slate-200/70 to-slate-600/70" />
-                  <div className="flex justify-between text-[8px] text-muted-foreground" dir="ltr">
-                    <span>۰</span>
-                    <span>۵۰</span>
-                    <span>۱۰۰</span>
-                  </div>
-                </div>
-              )}
-
-              {forecastField === 'cape' && (
-                <div className="mt-2">
-                  <div className="mb-1 text-[9px] text-muted-foreground">انرژی ناپایداری — CAPE (J/kg)</div>
-                  <div className="h-2 w-full rounded-full" style={{ background: CAPE_LEGEND_CSS }} />
-                  <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
-                    <span>۳۰</span>
-                    <span>۱۵۰</span>
-                    <span>۴۰۰</span>
-                    <span>۹۰۰</span>
-                    <span>۱۸۰۰</span>
-                    <span>۳۰۰۰+</span>
-                  </div>
-                  <p className="mt-1 text-[9px] leading-4 text-muted-foreground">
-                    CAPE بالای ۱۰۰۰ = پتانسیل رگبار و رعدوبرق؛ بالای ۲۵۰۰ = رگبار شدید و تگرگ
-                  </p>
-                </div>
-              )}
-              {forecastField === 'snow' && (
-                <div className="mt-2">
-                  <div className="mb-1 text-[9px] text-muted-foreground">شدت بارش برف (cm/h)</div>
-                  <div className="h-2 w-full rounded-full" style={{ background: SNOW_LEGEND_CSS }} />
-                  <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
-                    <span>۰٫۰۲</span>
-                    <span>۰٫۰۸</span>
-                    <span>۰٫۲</span>
-                    <span>۰٫۵</span>
-                    <span>۱</span>
-                    <span>۲+</span>
-                  </div>
-                </div>
-              )}
+              {/* per-field value legends removed — the map self-labels with
+                  system-core pills whose dots carry the spectrum colour */}
 
               <p className="mt-2 text-[9px] leading-4 text-emerald-200/70">
                 میله زمان پایین صفحه را با موس بکشید — از «امروز» تا ۱۵ روز آینده؛ لایه‌های رنگی بر

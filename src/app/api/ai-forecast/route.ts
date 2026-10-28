@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
 import { fetchWeather, fetchAtmosphere, round2 } from '@/lib/weather-server'
-import type { AIAnalysis } from '@/lib/weather-types'
+import type { AIDayData, AIAnalysis } from '@/lib/weather-types'
 
 export const maxDuration = 180
 
-const cache = new Map<string, { data: AIAnalysis; ts: number }>()
+const cache = new Map<string, { data: AIAnalysis; dayData: AIDayData[]; ts: number }>()
 
 function magnusDewpoint(tC: number, rh: number): number {
   const rhMin = Math.max(rh, 1)
@@ -20,10 +20,10 @@ function buildAnalysisPrompt(
   name: string,
   province: string,
   weather: Awaited<ReturnType<typeof fetchWeather>>,
-  atm: Awaited<ReturnType<typeof fetchAtmosphere>>
+  atm: Awaited<ReturnType<typeof fetchAtmosphere>>,
+  dayData: AIDayData[]
 ): string {
   const c = weather.current
-  const d = weather.daily
   const h = weather.hourly
 
   // Compact hourly next 12h
@@ -84,17 +84,6 @@ function buildAnalysisPrompt(
   const convectiveThreat =
     maxCape24 > 2500 ? 'بالا (رگبار/رعدوبرق محتمل)' : maxCape24 > 1000 ? 'متوسط' : 'کم'
 
-  const daily7 = d.time.map((t, i) => ({
-    تاریخ: t,
-    کد_وضعیت: d.weather_code[i],
-    بیشینه: Math.round(d.temperature_2m_max[i]),
-    کمینه: Math.round(d.temperature_2m_min[i]),
-    بارش_mm: d.precipitation_sum[i],
-    احتمال_بارش: d.precipitation_probability_max[i],
-    باد_بیشینه: Math.round(d.wind_speed_10m_max[i]),
-    UV: Math.round(d.uv_index_max[i]),
-  }))
-
   return JSON.stringify({
     مکان: {
       شهر: name,
@@ -138,7 +127,23 @@ function buildAnalysisPrompt(
       برش_باد_سطح_تا_۵۰۰: shear500,
       ارزیابی_تهدید_همرفتی: convectiveThreat,
     },
-    پیش‌بینی_روزانه_۷روز: daily7,
+    داده_روزانه_برای_پیش‌بینی_روزبه‌روز: dayData.map((d) => ({
+      تاریخ: d.date,
+      کد_وضعیت: d.weatherCode,
+      بیشینه_دما: d.tMax,
+      کمینه_دما: d.tMin,
+      بارش_mm: d.precipMm,
+      احتمال_بارش_درصد: d.precipProb,
+      ساعات_بارش: d.precipHours,
+      برف_cm: d.snowCm,
+      بیشینه_باد_kmh: d.windMax,
+      تندباد_kmh: d.gustMax,
+      جهت_باد_درجه: d.windDir,
+      رطوبت_میانگین_درصد: d.humidityMean,
+      UV_بیشینه: d.uvMax,
+      طلوع: d.sunrise,
+      غروب: d.sunset,
+    })),
   })
 }
 
@@ -155,6 +160,17 @@ const SYSTEM_PROMPT = `تو «آسمان‌نگار-پرو» هستی؛ هواش
 - زبان: فارسی روان، حرفه‌ای، قابل فهم برای عموم ولی با اصطلاحات علمی درست و نام واقعی دریاها/کوهستان‌های مرتبط (خزر، خلیج فارس، دریای عرب، زاگرس، البرز و...).
 - خروجی فقط JSON معتبر بدون هیچ متن اضافه.
 
+قواعد «پیش‌بینی روزبه‌روز» (آرایه dailyForecast — مهم‌ترین بخش خروجی):
+- برای «هر» روزِ آرایه داده_روزانه، دقیقاً یک شیء با همان «تاریخ» بساز. هیچ روزی را جا نینداز و روزی اضافه نکن.
+- headline: یک تیتر کوتاه و قوی (حداکثر ۱۲ کلمه) که کل آن روز را خلاصه می‌کند؛ مثل «عبور موج بارشی مدیترانه‌ای با تندباد ۶۵ کیلومتر» یا «آفتابی و رو به گرم شدن».
+- details: تحلیل کارشناسی ۲ تا ۴ جمله‌ای برای همان روز که حتماً اعداد داده‌ها را به فارسی ذکر کند:
+  * اگر بارش هست: نوع (باران/رگبار/نم‌نم/برف/بارش مخلوط باران و برف)، مقدار دقیق mm، ساعات بارش و احتمال درصدی. اگر برف_cm بالای صفر است یا کمینه دما نزدیک صفر با بارش است، شرایط برف‌نشین و ارتفاع تقریبی برف را بگو.
+  * اگر باد است: جهت اصلی به فارسی (شمالی/جنوب‌غربی/...)، سرعت بیشینه km/h و اگر تندباد > ۴۰ است تندباد را هم ذکر کن.
+  * رطوبت میانگین درصدی و تأثیرش (هوای شرجی/خشک)، دمای بیشینه و کمینه، و اگر UV ≥ ۷ است هشدار آفتاب.
+  * مکانیزم هواشناسی کوتاه: منشأ توده (مدیترانه‌ای/خزری/صحرایی/...) یا پرشر/ناوه، فقط وقتی از داده‌های سینوپتیک نتیجه‌گیری می‌شود.
+- سه روز اول را مفصل‌تر و روزهای دورتر را کوتاه‌تر بنویس. روزهای کاملاً بدون رویداد را صادقانه کوتاه بگو (مثلاً «آسمان صاف، افزایش ملایم دما»).
+- هرگز عددی از خودت نساز که در داده‌ها نباشد.
+
 ساختار JSON خروجی:
 {
   "summary": "خلاصه ۲ تا ۳ جمله‌ای وضعیت هوا",
@@ -164,13 +180,60 @@ const SYSTEM_PROMPT = `تو «آسمان‌نگار-پرو» هستی؛ هواش
   "instability": "تحلیل ناپایداری: CAPE و روندش، LI، برش باد، نقطه شبنم، ارزیابی رگبار/رعدوبرق/تگرگ (۳ تا ۵ جمله)",
   "atmosphereLayers": "تحلیل لایه‌های جو از سطح تا ۲۰۰ هکتوپاسکال: پایداری، وارونگی، رطوبت لایه‌ای (۳ تا ۵ جمله)",
   "hourlyOutlook": "پیش‌بینی رویدادمحور ۴۸ ساعت آینده با ساعات کلیدی (۲ تا ۴ جمله)",
-  "weeklyOutlook": "پیش‌بینی روند ۷ روز آینده با ذکر روزهای بحرانی (۲ تا ۴ جمله)",
+  "weeklyOutlook": "روند کلی کل دوره انتخابی با ذکر روزهای بحرانی و انتقال سامانه‌ها (۲ تا ۴ جمله)",
+  "dailyForecast": [
+    { "date": "yyyy-mm-dd همان تاریخِ داده", "headline": "تیتر روز", "details": "تحلیل کارشناسی با اعداد" }
+  ],
   "hazardsTimeline": ["بازه زمانی: خطر — احتمال/شدت", ...],
   "warnings": ["هشدار ۱", "هشدار ۲"],
   "tips": "توصیه کاربردی کوتاه",
   "confidence": عدد بین ۰.۵ تا ۰.۹۵
 }
 اگر هشداری نیست، آرایه‌ها را خالی بده.`
+
+/** per-day numeric rows guaranteed to be accurate (never trust the LLM with numbers) */
+function buildDayData(
+  weather: Awaited<ReturnType<typeof fetchWeather>>,
+  days: number
+): AIDayData[] {
+  const d = weather.daily
+  const h = weather.hourly
+  const out: AIDayData[] = []
+  const n = Math.min(days, d.time.length)
+  for (let i = 0; i < n; i++) {
+    const date = d.time[i]
+    // humidity mean for this local day from the hourly series
+    let hSum = 0
+    let hCnt = 0
+    for (let k = 0; k < h.time.length; k++) {
+      if (h.time[k].slice(0, 10) === date) {
+        const rh = h.relative_humidity_2m[k]
+        if (Number.isFinite(rh)) {
+          hSum += rh
+          hCnt++
+        }
+      }
+    }
+    out.push({
+      date,
+      weatherCode: d.weather_code[i] ?? 0,
+      tMax: Math.round(d.temperature_2m_max[i] ?? 0),
+      tMin: Math.round(d.temperature_2m_min[i] ?? 0),
+      precipMm: Math.round((d.precipitation_sum[i] ?? 0) * 10) / 10,
+      precipProb: Math.round(d.precipitation_probability_max?.[i] ?? 0),
+      precipHours: Math.round(d.precipitation_hours?.[i] ?? 0),
+      snowCm: Math.round((d.snowfall_sum?.[i] ?? 0) * 10) / 10,
+      windMax: Math.round(d.wind_speed_10m_max[i] ?? 0),
+      gustMax: Math.round(d.wind_gusts_10m_max?.[i] ?? 0),
+      windDir: Math.round(d.wind_direction_10m_dominant?.[i] ?? 0),
+      humidityMean: hCnt ? Math.round(hSum / hCnt) : 0,
+      uvMax: Math.round(d.uv_index_max[i] ?? 0),
+      sunrise: d.sunrise[i] ?? '',
+      sunset: d.sunset[i] ?? '',
+    })
+  }
+  return out
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -179,15 +242,17 @@ export async function POST(req: NextRequest) {
     const lon = Number(body?.lon)
     const name = String(body?.name ?? 'نامشخص')
     const province = String(body?.province ?? '')
+    const daysRaw = Number(body?.days)
+    const days = daysRaw === 3 || daysRaw === 14 ? daysRaw : 7 // 3 / 7 / 14
 
     if (Number.isNaN(lat) || Number.isNaN(lon)) {
       return NextResponse.json({ error: 'مختصات نامعتبر است' }, { status: 400 })
     }
 
-    const cacheKey = `${round2(lat)},${round2(lon)}`
+    const cacheKey = `${round2(lat)},${round2(lon)}:${days}`
     const hit = cache.get(cacheKey)
     if (hit && Date.now() - hit.ts < 45 * 60_000) {
-      return NextResponse.json({ analysis: hit.data, cached: true })
+      return NextResponse.json({ analysis: hit.data, dayData: hit.dayData, cached: true })
     }
 
     const [weather, atm] = await Promise.all([
@@ -195,7 +260,8 @@ export async function POST(req: NextRequest) {
       fetchAtmosphere(lat, lon),
     ])
 
-    const userData = buildAnalysisPrompt(name, province, weather, atm)
+    const dayData = buildDayData(weather, days)
+    const userData = buildAnalysisPrompt(name, province, weather, atm, dayData)
 
     const zai = await ZAI.create()
     const completion = await zai.chat.completions.create({
@@ -203,7 +269,7 @@ export async function POST(req: NextRequest) {
         { role: 'assistant', content: SYSTEM_PROMPT },
         {
           role: 'user',
-          content: `داده‌های هواشناسی «${name}» (${province || '—'}):\n${userData}\n\nبر اساس این داده‌ها «تحلیل فوق‌قوی» کامل تولید کن؛ حتماً به اعداد ارجاع بده و مکانیسم هواشناسی را توضیح بده. فقط JSON بده.`,
+          content: `داده‌های هواشناسی «${name}» (${province || '—'}):\n${userData}\n\nبر اساس این داده‌ها «تحلیل فوق‌قوی» کامل برای افق ${days} روزه تولید کن؛ dailyForecast باید برای هر ${days} روزِ داده_روزانه یک ردیف با همان تاریخ داشته باشد. حتماً به اعداد ارجاع بده و مکانیسم هواشناسی را توضیح بده. فقط JSON بده.`,
         },
       ],
       thinking: { type: 'disabled' },
@@ -215,7 +281,18 @@ export async function POST(req: NextRequest) {
 
     let analysis: AIAnalysis
     try {
-      const parsed = JSON.parse(content)
+      const parsed = JSON.parse(content) as Record<string, unknown>
+      const dailyForecastRaw = Array.isArray(parsed.dailyForecast) ? parsed.dailyForecast : []
+      const dailyForecast = dailyForecastRaw
+        .map((x) => {
+          const o = (x ?? {}) as Record<string, unknown>
+          return {
+            date: String(o.date ?? ''),
+            headline: String(o.headline ?? ''),
+            details: String(o.details ?? ''),
+          }
+        })
+        .filter((x) => x.date && (x.headline || x.details))
       analysis = {
         summary: String(parsed.summary ?? ''),
         currentAnalysis: String(parsed.currentAnalysis ?? ''),
@@ -225,12 +302,14 @@ export async function POST(req: NextRequest) {
         atmosphereLayers: String(parsed.atmosphereLayers ?? ''),
         hourlyOutlook: String(parsed.hourlyOutlook ?? ''),
         weeklyOutlook: String(parsed.weeklyOutlook ?? ''),
+        dailyForecast,
         hazardsTimeline: Array.isArray(parsed.hazardsTimeline)
           ? parsed.hazardsTimeline.map(String)
           : [],
         warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [],
         tips: String(parsed.tips ?? ''),
         confidence: Number(parsed.confidence) || 0.75,
+        horizon: days,
       }
     } catch {
       // fallback: treat whole content as summary
@@ -244,11 +323,12 @@ export async function POST(req: NextRequest) {
         warnings: [],
         tips: '',
         confidence: 0.6,
+        horizon: days,
       }
     }
 
-    cache.set(cacheKey, { data: analysis, ts: Date.now() })
-    return NextResponse.json({ analysis })
+    cache.set(cacheKey, { data: analysis, dayData, ts: Date.now() })
+    return NextResponse.json({ analysis, dayData })
   } catch (e) {
     console.error('ai-forecast error', e)
     return NextResponse.json(

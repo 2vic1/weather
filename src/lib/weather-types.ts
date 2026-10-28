@@ -49,6 +49,14 @@ export interface DailySlice {
   precipitation_probability_max: number[]
   wind_speed_10m_max: number[]
   uv_index_max: number[]
+  /** cm snowfall accumulated that day */
+  snowfall_sum?: number[]
+  /** km/h max gust that day */
+  wind_gusts_10m_max?: number[]
+  /** meteorological degrees — direction the wind comes FROM */
+  wind_direction_10m_dominant?: number[]
+  /** number of hours with precipitation */
+  precipitation_hours?: number[]
 }
 
 export interface WeatherData {
@@ -188,6 +196,32 @@ export interface AnalysisFieldData {
 
 // ===== AI analysis =====
 
+/** Server-computed per-day numbers for the AI expert forecast (guaranteed accurate) */
+export interface AIDayData {
+  date: string
+  weatherCode: number
+  tMax: number
+  tMin: number
+  precipMm: number
+  precipProb: number
+  precipHours: number
+  snowCm: number
+  windMax: number
+  gustMax: number
+  windDir: number
+  humidityMean: number
+  uvMax: number
+  sunrise: string
+  sunset: string
+}
+
+/** LLM-written expert narrative for one day */
+export interface AIDayForecast {
+  date: string
+  headline: string
+  details: string
+}
+
 export interface AIAnalysis {
   summary: string
   currentAnalysis: string
@@ -204,4 +238,8 @@ export interface AIAnalysis {
   instability?: string
   /** خط زمانی خطرات ۴۸ ساعت آینده */
   hazardsTimeline?: string[]
+  /** روایت کارشناسی روزبه‌روز تولیدشده توسط مدل زبانی */
+  dailyForecast?: AIDayForecast[]
+  /** افق پیش‌بینی انتخابی (۳ / ۷ / ۱۴ روز) */
+  horizon?: number
 }
