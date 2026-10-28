@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { cachedFetch } from '@/lib/weather-server'
+import { cachedFetch, OM_BASE } from '@/lib/weather-server'
 import { ANALYSIS_CITIES } from '@/lib/analysis-cities'
 import type { AnalysisFieldData, AQPoint, CapePoint } from '@/lib/weather-types'
 
@@ -26,7 +26,7 @@ export async function GET() {
     const lons = ANALYSIS_CITIES.map((c) => c.lon).join(',')
 
     const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lats}&longitude=${lons}&hourly=pm2_5,pm10,dust&timezone=GMT&forecast_days=1&domains=cams_global`
-    const capeUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=cape&timezone=GMT`
+    const capeUrl = `${OM_BASE}/v1/forecast?latitude=${lats}&longitude=${lons}&current=cape&timezone=GMT`
 
     const [aqRaw, capeRaw] = await Promise.all([
       cachedFetch<unknown>('analysis:aq', aqUrl, 15 * 60_000),

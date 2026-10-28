@@ -54,10 +54,10 @@ function buildAnalysisPrompt(
     جهت_باد: Math.round(l.windDirection[0]),
   }))
 
-  // instability trend (now → +6h)
-  const capeTrend = atm.cape.slice(0, 7).map((v) => Math.round(v))
-  const liTrend = atm.liftedIndex.slice(0, 7).map((v) => Math.round(v * 10) / 10)
-  const maxCape24 = Math.max(...atm.cape)
+  // instability trend (now → +24h, 3-hourly steps)
+  const capeTrend = atm.cape.slice(0, 8).map((v) => Math.round(v)) // next 24h (3-hourly steps)
+  const liTrend = atm.liftedIndex.slice(0, 8).map((v) => Math.round(v * 10) / 10)
+  const maxCape24 = Math.max(...atm.cape.slice(0, 8))
 
   // vertical wind shear between surface and 500 hPa (speed + direction)
   const surf = atm.surface

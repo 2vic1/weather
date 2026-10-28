@@ -4,6 +4,9 @@ import type { WeatherData, AtmosphereData } from './weather-types'
 
 const UA = 'AsmanNegar/1.0 (weather app)'
 
+/** Base URL of the Open-Meteo forecast API — overridable for tests / self-hosted proxies */
+export const OM_BASE = process.env.OPEN_METEO_BASE?.replace(/\/$/, '') || 'https://api.open-meteo.com'
+
 /**
  * IPv4-forced HTTPS GET with JSON parsing.
  * Fallback for sandboxed hosts where the undici global fetch tries a broken
@@ -44,6 +47,7 @@ function https4Get<T>(url: string, timeoutMs = 15000): Promise<T> {
 }
 
 const cache = new Map<string, { data: unknown; ts: number }>()
+const STALE_MS = 24 * 3600_000 // serve up to 24h-old data when upstream is unreachable / quota-exhausted
 
 async function rawFetch<T>(url: string): Promise<T> {
   const res = await fetch(url, {
@@ -71,14 +75,20 @@ export async function cachedFetch<T>(key: string, url: string, ttlMs: number): P
       data = await https4Get<T>(url)
     } catch {
       await new Promise((r) => setTimeout(r, 900))
-      data = await https4Get<T>(url)
+      try {
+        data = await https4Get<T>(url)
+      } catch {
+        // upstream unreachable or rate-limited → fall back to stale cache if we have any
+        if (hit && now - hit.ts < STALE_MS) return hit.data as T
+        throw new Error('upstream unavailable and no cached data')
+      }
     }
   }
   cache.set(key, { data, ts: now })
-  // prune old entries
+  // prune entries older than the stale window
   if (cache.size > 500) {
     for (const [k, v] of cache) {
-      if (now - v.ts > 3600_000) cache.delete(k)
+      if (now - v.ts > STALE_MS) cache.delete(k)
     }
   }
   return data
@@ -101,10 +111,10 @@ export async function fetchWeather(lat: number, lon: number): Promise<WeatherDat
     daily:
       'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,uv_index_max',
     timezone: 'auto',
-    forecast_days: '7',
+    forecast_days: '16',
     wind_speed_unit: 'kmh',
   })
-  const url = `https://api.open-meteo.com/v1/forecast?${params}`
+  const url = `${OM_BASE}/v1/forecast?${params}`
   const raw = await cachedFetch<Record<string, unknown>>(`wx:${round2(lat)},${round2(lon)}`, url, 10 * 60_000)
 
   const current = raw.current as WeatherData['current']
@@ -120,11 +130,11 @@ export async function fetchWeather(lat: number, lon: number): Promise<WeatherDat
   }
   const daily = raw.daily as WeatherData['daily']
 
-  // Slice hourly: from current hour, next 48h
+  // Slice hourly: from current hour → full 16-day horizon (~384 entries)
   const nowIso = (current.time as string).slice(0, 13)
   let startIdx = hourlyRaw.time.findIndex((t) => t.slice(0, 13) === nowIso)
   if (startIdx < 0) startIdx = 0
-  const endIdx = Math.min(startIdx + 48, hourlyRaw.time.length)
+  const endIdx = hourlyRaw.time.length
   const slice = <T,>(arr: T[]): T[] => arr.slice(startIdx, endIdx)
 
   const hourly: HourlySliceType = {
@@ -181,26 +191,32 @@ export async function fetchAtmosphere(lat: number, lon: number): Promise<Atmosph
     longitude: String(lon),
     hourly: [...levelVars, ...surfaceVars, ...stability].join(','),
     timezone: 'auto',
-    forecast_days: '3',
+    forecast_days: '16',
     wind_speed_unit: 'kmh',
   })
-  const url = `https://api.open-meteo.com/v1/forecast?${params}`
-  const raw = await cachedFetch<Record<string, unknown>>(`atm:${round2(lat)},${round2(lon)}`, url, 15 * 60_000)
+  const url = `${OM_BASE}/v1/forecast?${params}`
+  const raw = await cachedFetch<Record<string, unknown>>(`atm:${round2(lat)},${round2(lon)}`, url, 30 * 60_000)
 
   const hourly = raw.hourly as Record<string, (number | null)[] | string[]>
   const time = hourly.time as string[]
 
-  // Slice from current hour → next 6 hours (7 entries)
-  const nowKey = new Date().toLocaleString('sv-SE', { timeZone: raw.timezone as string }).slice(0, 13)
+  // Slice from current hour → 15-day horizon, subsampled every 3 hours (~120 steps).
+  // NOTE: toLocaleString('sv-SE') yields "YYYY-MM-DD HH" (space) while Open-Meteo
+  // uses "YYYY-MM-DDTHH" — normalize before comparing, else startIdx = 0 (bug).
+  const nowKey = new Date()
+    .toLocaleString('sv-SE', { timeZone: raw.timezone as string })
+    .slice(0, 13)
+    .replace(' ', 'T')
   let startIdx = time.findIndex((t) => t.slice(0, 13) === nowKey)
   if (startIdx < 0) startIdx = 0
-  const endIdx = Math.min(startIdx + 7, time.length)
-  const n = endIdx - startIdx
+  const STEP = 3 // hours between profile steps
+  const sel: number[] = []
+  for (let i = startIdx; i < time.length && sel.length < 120; i += STEP) sel.push(i)
 
   const sliceNum = (key: string): number[] => {
     const arr = (hourly[key] as (number | null)[] | undefined) ?? []
     const out: number[] = []
-    for (let i = startIdx; i < endIdx; i++) out.push(arr[i] ?? NaN)
+    for (const i of sel) out.push(arr[i] ?? NaN)
     return out
   }
 
@@ -217,7 +233,7 @@ export async function fetchAtmosphere(lat: number, lon: number): Promise<Atmosph
   }))
 
   return {
-    time: time.slice(startIdx, endIdx),
+    time: sel.map((i) => time[i] ?? ''),
     levels,
     cape: sliceNum('cape'),
     liftedIndex: sliceNum('lifted_index'),
@@ -260,7 +276,7 @@ async function multiPointCurrent<T>(
       wind_speed_unit: 'kmh',
       timezone: 'GMT',
     })
-    const url = `https://api.open-meteo.com/v1/forecast?${params}`
+    const url = `${OM_BASE}/v1/forecast?${params}`
     const data = await cachedFetch<{ current?: Record<string, number | null> } | { current?: Record<string, number | null> }[]>(
       `${cachePrefix}:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`,
       url,
@@ -436,7 +452,7 @@ export async function fetchForecastField(
       forecast_days: '16',
       timezone: 'UTC',
     })
-    const url = `https://api.open-meteo.com/v1/forecast?${params}`
+    const url = `${OM_BASE}/v1/forecast?${params}`
     const raw = await cachedFetch<unknown>(`ffr:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`, url, 45 * 60_000)
     const arr = (Array.isArray(raw) ? raw : [raw]) as Array<{
       hourly?: { time?: string[]; precipitation?: (number | null)[]; temperature_2m?: (number | null)[]; cloud_cover?: (number | null)[] }

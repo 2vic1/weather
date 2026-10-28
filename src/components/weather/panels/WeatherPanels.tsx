@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
   Cloud,
@@ -12,6 +12,7 @@ import {
   Sunset,
   Umbrella,
   Wind,
+  Rewind,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -41,6 +42,7 @@ import {
 import { uvFa, weatherCodeInfo, windDirectionFa } from '@/lib/weather-codes'
 import type { WeatherData } from '@/lib/weather-types'
 import { useWeatherStore } from '@/store/weather-store'
+import TimeBar, { dayTicksFromTimes, relHoursFa } from '../TimeSlider'
 import { cn } from '@/lib/utils'
 
 /* ---------------- shared bits ---------------- */
@@ -302,16 +304,19 @@ function HourlySkeleton() {
   )
 }
 
+const WINDOW_H = 24 // hours visible at once inside the 15-day horizon
+
 function HourlyContent({ data }: { data: WeatherData }) {
   const h = data.hourly
+  const [winStart, setWinStart] = useState(0)
+
+  const total = h.time.length
+  const winMax = Math.max(total - WINDOW_H, 0)
+  const start = Math.min(winStart, winMax)
+  const end = Math.min(start + WINDOW_H, total)
 
   const points = useMemo<HourPoint[]>(() => {
-    if (h.time.length === 0) return []
-    // next 24h starting from the current hour
-    const nowKey = data.current.time.slice(0, 13)
-    let start = h.time.findIndex((t) => t.slice(0, 13) >= nowKey)
-    if (start < 0) start = 0
-    const end = Math.min(start + 24, h.time.length)
+    if (total === 0) return []
     const out: HourPoint[] = []
     for (let i = start; i < end; i++) {
       out.push({
@@ -324,7 +329,10 @@ function HourlyContent({ data }: { data: WeatherData }) {
       })
     }
     return out
-  }, [h, data])
+  }, [h, data, start, end, total])
+
+  const ticks = useMemo(() => dayTicksFromTimes(h.time, winMax), [h.time, winMax])
+  const rel = relHoursFa(start)
 
   if (points.length === 0) {
     return (
@@ -338,7 +346,7 @@ function HourlyContent({ data }: { data: WeatherData }) {
     <Fade className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">
-          پیش‌بینی ساعتی — ۲۴ ساعت آینده
+          پیش‌بینی ساعتی — ۱۵ روز
         </span>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
           <span className="flex items-center gap-1">
@@ -346,6 +354,35 @@ function HourlyContent({ data }: { data: WeatherData }) {
           </span>
           <span className="flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" /> احتمال بارش (٪)
+          </span>
+        </div>
+      </div>
+
+      {/* 15-day scrubber — same interaction as the map forecast bar */}
+      <div className="rounded-2xl border border-border/50 bg-muted/30 px-3 py-1">
+        <div className="flex items-center gap-2">
+          {start > 0 && (
+            <button
+              onClick={() => setWinStart(0)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300 transition-all hover:scale-105 hover:bg-amber-500/30"
+              title="بازگشت به اکنون"
+            >
+              <Rewind className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <TimeBar
+            value={start}
+            max={winMax}
+            ticks={ticks}
+            onChange={setWinStart}
+            ariaLabel="اسلایدر زمان پیش‌بینی ساعتی ۱۵ روزه"
+            ariaValueText={`${rel} — ${points[0]?.label ?? ''}`}
+          />
+          <span
+            className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary"
+            dir="rtl"
+          >
+            {rel}
           </span>
         </div>
       </div>
@@ -445,7 +482,7 @@ export function HourlyPanel() {
       ) : error ? (
         <PanelError message={error} />
       ) : data ? (
-        <HourlyContent data={data} />
+        <HourlyContent key={`${city.lat},${city.lon}`} data={data} />
       ) : (
         <HourlySkeleton />
       )}
@@ -459,7 +496,7 @@ function DailySkeleton() {
   return (
     <div className="flex flex-col gap-2">
       <Skeleton className="h-3.5 w-36" />
-      {Array.from({ length: 7 }).map((_, i) => (
+      {Array.from({ length: 8 }).map((_, i) => (
         <Skeleton key={i} className="h-[52px] rounded-2xl" />
       ))}
     </div>
@@ -468,7 +505,7 @@ function DailySkeleton() {
 
 function DailyContent({ data }: { data: WeatherData }) {
   const d = data.daily
-  const n = Math.min(7, d.time.length)
+  const n = Math.min(15, d.time.length)
 
   const weekMin = useMemo(() => Math.min(...d.temperature_2m_min.slice(0, n)), [d, n])
   const weekMax = useMemo(() => Math.max(...d.temperature_2m_max.slice(0, n)), [d, n])
@@ -485,7 +522,7 @@ function DailyContent({ data }: { data: WeatherData }) {
   return (
     <Fade className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">پیش‌بینی ۷ روز آینده</span>
+        <span className="text-xs font-medium text-muted-foreground">پیش‌بینی ۱۵ روز آینده</span>
         <span className="text-[10px] text-muted-foreground">کمترین / بیشترین دما (°C)</span>
       </div>
 

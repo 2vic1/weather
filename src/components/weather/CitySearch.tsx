@@ -81,7 +81,11 @@ export default function CitySearch({ compact = false }: { compact?: boolean }) {
           </kbd>
         </button>
       </DialogTrigger>
-      <DialogContent className="glass-strong max-w-lg border-border/60 p-0" dir="rtl">
+      <DialogContent
+        className="glass-strong max-w-lg border-border/60 p-0"
+        dir="rtl"
+        aria-describedby={undefined}
+      >
         <DialogHeader className="px-4 pt-4 pb-2">
           <DialogTitle className="text-base">جستجوی شهر یا موقعیت</DialogTitle>
         </DialogHeader>

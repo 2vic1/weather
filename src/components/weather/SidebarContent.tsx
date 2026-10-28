@@ -23,7 +23,7 @@ import { faNum } from '@/lib/format'
 const TABS: Array<{ id: SidebarTab; label: string; icon: typeof ThermometerSun }> = [
   { id: 'current', label: 'اکنون', icon: ThermometerSun },
   { id: 'hourly', label: 'ساعتی', icon: Clock3 },
-  { id: 'daily', label: '۷ روزه', icon: CalendarDays },
+  { id: 'daily', label: '۱۵ روزه', icon: CalendarDays },
   { id: 'rain', label: 'بارش', icon: CloudRain },
   { id: 'atmosphere', label: 'لایه‌های جو', icon: Layers3 },
   { id: 'ai', label: 'هوش مصنوعی', icon: Sparkles },

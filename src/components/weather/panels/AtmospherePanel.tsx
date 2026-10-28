@@ -8,14 +8,16 @@ import {
   Layers3,
   Wind,
   Zap,
+  Rewind,
 } from 'lucide-react'
 import { useWeatherStore } from '@/store/weather-store'
 import { useAtmosphere } from '@/hooks/use-weather-data'
 import type { AtmosphereData, PressureLevelData } from '@/lib/weather-types'
-import { faNum, faRound, faTime, windDirArrow } from '@/lib/format'
+import { faNum, faRound, faDateTime, windDirArrow } from '@/lib/format'
 import { windDirectionFa } from '@/lib/weather-codes'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
+import TimeBar, { dayTicksFromTimes, relHoursFa } from '../TimeSlider'
 
 // ---------- SVG geometry ----------
 const SVG_W = 580
@@ -102,6 +104,20 @@ export default function AtmospherePanel() {
   }
 
   const idx = Math.min(hourIdx, Math.max((data?.time.length ?? 1) - 1, 0))
+
+  // day ticks + relative label for the 15-day scrubber
+  const tMax = Math.max((data?.time.length ?? 1) - 1, 0)
+  const ticks = useMemo(
+    () => (data ? dayTicksFromTimes(data.time, tMax) : []),
+    [data, tMax]
+  )
+  const rel = useMemo(() => {
+    if (!data || data.time.length < 2 || idx === 0) return relHoursFa(0)
+    const a = new Date(`${data.time[0].slice(0, 13)}:00Z`).getTime()
+    const b = new Date(`${data.time[idx].slice(0, 13)}:00Z`).getTime()
+    if (Number.isNaN(a) || Number.isNaN(b)) return relHoursFa(0)
+    return relHoursFa(Math.max(0, Math.round((b - a) / 3_600_000)))
+  }, [data, idx])
 
   const points: ProfilePoint[] = useMemo(() => {
     if (!data) return []
@@ -247,7 +263,7 @@ export default function AtmospherePanel() {
         </div>
         {data.time[idx] ? (
           <div className="rounded-full bg-primary/15 px-2.5 py-1 text-[11px] font-bold text-primary">
-            {faTime(data.time[idx])}
+            {faDateTime(data.time[idx])}
           </div>
         ) : null}
       </div>
@@ -258,23 +274,33 @@ export default function AtmospherePanel() {
         </div>
       ) : null}
 
-      {/* hour selector */}
-      <div className="flex flex-wrap gap-1.5 rounded-2xl border border-border/50 bg-muted/30 p-3">
-        {data.time.map((t, i) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setHourIdx(i)}
-            className={cn(
-              'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-              i === idx
-                ? 'border-primary/70 bg-primary/20 font-bold text-primary'
-                : 'border-border/50 bg-muted/40 text-muted-foreground hover:text-foreground'
-            )}
+      {/* 15-day time scrubber — drag from now up to +15 days */}
+      <div className="rounded-2xl border border-border/50 bg-muted/30 px-3 py-1">
+        <div className="flex items-center gap-2">
+          {idx > 0 && (
+            <button
+              onClick={() => setHourIdx(0)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300 transition-all hover:scale-105 hover:bg-amber-500/30"
+              title="بازگشت به اکنون"
+            >
+              <Rewind className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <TimeBar
+            value={idx}
+            max={tMax}
+            ticks={ticks}
+            onChange={setHourIdx}
+            ariaLabel="اسلایدر زمان نیم‌رخ جو ۱۵ روزه"
+            ariaValueText={`${rel} — ${data.time[idx] ? faDateTime(data.time[idx]) : ''}`}
+          />
+          <span
+            className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary"
+            dir="rtl"
           >
-            {faTime(t)}
-          </button>
-        ))}
+            {rel}
+          </span>
+        </div>
       </div>
 
       {/* profile chart */}

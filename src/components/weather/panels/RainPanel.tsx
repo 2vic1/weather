@@ -148,8 +148,8 @@ function RainContent({ data }: { data: WeatherData }) {
     return out
   }, [h, data])
 
-  const days7 = useMemo(() => {
-    const n = Math.min(7, d.time.length)
+  const days15 = useMemo(() => {
+    const n = Math.min(15, d.time.length)
     const out: Array<{ key: string; label: string; mm: number; pop: number }> = []
     for (let i = 0; i < n; i++) {
       out.push({
@@ -179,8 +179,11 @@ function RainContent({ data }: { data: WeatherData }) {
       if (!startAt && p.mm >= 0.15) startAt = p.key
     }
     const maxPop = hours48.reduce((a, p) => Math.max(a, p.pop), 0)
-    return { sum24, sum48, maxMm, maxAt, startAt, wetHours, maxPop }
-  }, [hours48, h.time])
+    const sum15 = days15.reduce((a, p) => a + p.mm, 0)
+    const wetDays15 = days15.filter((p) => p.mm >= 1).length
+    const maxDay15 = days15.reduce((a, p) => (p.mm > a.mm ? p : a), days15[0] ?? { key: '', label: '', mm: 0, pop: 0 })
+    return { sum24, sum48, maxMm, maxAt, startAt, wetHours, maxPop, sum15, wetDays15, maxDay15 }
+  }, [hours48, days15, h.time])
 
   const showForecastMap = () => {
     if (!overlays.forecast) toggleOverlay('forecast')
@@ -259,17 +262,18 @@ function RainContent({ data }: { data: WeatherData }) {
         </ResponsiveContainer>
       </div>
 
-      {/* ===== 7-day rainfall chart ===== */}
+      {/* ===== 15-day rainfall chart ===== */}
       <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <CalendarDays className="h-3.5 w-3.5 text-cyan-300" aria-hidden />
-        بارش ۷ روز آینده (میلی‌متر در روز)
+        بارش ۱۵ روز آینده (میلی‌متر در روز)
       </div>
       <div dir="ltr" className="h-[140px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={days7} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
+          <ComposedChart data={days15} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
             <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
             <XAxis
               dataKey="label"
+              interval={1}
               tickMargin={6}
               tick={{ fill: '#94a3b8', fontSize: 9 }}
               tickLine={false}
@@ -284,7 +288,7 @@ function RainContent({ data }: { data: WeatherData }) {
               tickFormatter={(v: number) => faNum(v, 1)}
             />
             <Tooltip cursor={{ fill: 'rgba(148,163,184,0.08)' }} content={<RainTip />} />
-            <Bar yAxisId="mm" dataKey="mm" radius={[4, 4, 0, 0]} maxBarSize={26} fill="url(#rainBar)" />
+            <Bar yAxisId="mm" dataKey="mm" radius={[4, 4, 0, 0]} maxBarSize={18} fill="url(#rainBar)" />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -323,6 +327,19 @@ function RainContent({ data }: { data: WeatherData }) {
           value={`${faNum(stats.maxPop)}٪`}
           tone="text-indigo-300"
         />
+        <StatTile
+          icon={CalendarDays}
+          label="مجموع بارش ۱۵ روز"
+          value={`${faNum(stats.sum15, 1)} mm`}
+          sub={stats.wetDays15 > 0 ? `${faNum(stats.wetDays15)} روز بارانی (≥۱ mm)` : 'بدون روز بارانی'}
+          tone="text-cyan-200"
+        />
+        <StatTile
+          icon={CloudRainWind}
+          label="بارانی‌ترین روز ۱۵ روزه"
+          value={stats.maxDay15?.label ? `${stats.maxDay15.label} — ${faNum(stats.maxDay15.mm, 1)} mm` : '—'}
+          tone="text-sky-300"
+        />
       </div>
 
       {/* ===== advanced tools ===== */}
@@ -339,7 +356,7 @@ function RainContent({ data }: { data: WeatherData }) {
           >
             <span className="flex items-center gap-2">
               <CloudRainWind className="h-4 w-4" />
-              نقشه متحرک بارش ۴۸ ساعت آینده
+              نقشه متحرک بارش ۱۵ روز آینده
             </span>
             <span className="text-[9px] font-normal text-emerald-300/70">مثل ویندی →</span>
           </motion.button>
