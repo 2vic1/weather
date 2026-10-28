@@ -92,7 +92,7 @@ export default function TimelineControl() {
         const s = useWeatherStore.getState()
         const len = getForecastState().times.length
         if (len > 0) s.setForecastHour((s.forecastHour + 1) % len)
-      }, 450)
+      }, 300)
       return () => {
         if (tickRef.current) clearInterval(tickRef.current)
       }

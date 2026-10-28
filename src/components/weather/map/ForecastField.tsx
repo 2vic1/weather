@@ -17,18 +17,24 @@ import {
 import { tempColor } from '@/lib/weather-codes'
 import { faNum } from '@/lib/format'
 
-/** Windy-like precipitation ramp: mm → [r, g, b, alpha] */
+/**
+ * Windy-style precipitation ramp (mm/h) → [r, g, b, alpha].
+ * Mirrors the «Rain accumulation» look: pale white → green → blue →
+ * yellow → orange → red → maroon → deep purple cores.
+ */
 const PRECIP_STOPS: Array<[number, number, number, number, number]> = [
-  [0.1, 170, 215, 150, 0.26],
-  [0.3, 110, 195, 105, 0.4],
-  [0.6, 45, 160, 95, 0.48],
-  [1.2, 35, 125, 200, 0.54],
-  [2.5, 45, 185, 215, 0.58],
-  [5, 250, 220, 80, 0.62],
-  [10, 245, 150, 45, 0.66],
-  [20, 230, 65, 55, 0.7],
-  [40, 200, 55, 165, 0.74],
-  [80, 135, 60, 200, 0.78],
+  [0.08, 228, 246, 255, 0.3],
+  [0.2, 178, 228, 250, 0.4],
+  [0.5, 130, 224, 148, 0.52],
+  [1, 52, 198, 108, 0.6],
+  [2, 45, 140, 235, 0.62],
+  [4, 30, 100, 215, 0.66],
+  [6, 250, 226, 78, 0.7],
+  [10, 250, 156, 45, 0.74],
+  [16, 240, 60, 45, 0.78],
+  [26, 186, 34, 56, 0.82],
+  [45, 134, 26, 88, 0.86],
+  [75, 94, 16, 108, 0.9],
 ]
 
 function precipColor(mm: number): [number, number, number, number] {
@@ -51,6 +57,32 @@ function cloudsColor(cc: number): [number, number, number, number] {
   if (!Number.isFinite(cc) || cc < 5) return [0, 0, 0, 0]
   const t = Math.min(cc, 100) / 100
   return [235 - t * 110, 240 - t * 112, 245 - t * 105, 0.08 + t * 0.42]
+}
+
+/** NaN-aware 3×3 box blur — one pass; makes model blobs organic like Windy */
+function blurField(src: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(src.length)
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      let sum = 0
+      let cnt = 0
+      for (let di = -1; di <= 1; di++) {
+        const ii = i + di
+        if (ii < 0 || ii >= n) continue
+        for (let dj = -1; dj <= 1; dj++) {
+          const jj = j + dj
+          if (jj < 0 || jj >= n) continue
+          const v = src[ii * n + jj]
+          if (Number.isFinite(v)) {
+            sum += v
+            cnt++
+          }
+        }
+      }
+      out[i * n + j] = cnt > 0 ? sum / cnt : NaN
+    }
+  }
+  return out
 }
 
 export default function ForecastField() {
@@ -88,7 +120,7 @@ export default function ForecastField() {
           lonMin: b.getWest(),
           lonMax: b.getEast(),
         },
-        20
+        28
       )
     }
     fetchBounds()
@@ -171,7 +203,22 @@ export default function ForecastField() {
       const rh = br.y - tl.y
       if (rw < 4 || rh < 4 || rx > w || ry > h || rx + rw < 0 || ry + rh < 0) return
 
-      // paint grid values into a tiny offscreen canvas (n × n), then upscale smoothly
+      // paint grid values into a tiny offscreen canvas (n × n) → smooth → upscale.
+      // blur pass makes model blobs organic (Windy-style); double upscale
+      // (n → 4n → screen) yields continuous gradients instead of blocky cells.
+      let vals = new Float64Array(n * n)
+      for (let k = 0; k < n * n; k++) {
+        const p = grid[k]
+        const arr = field === 'precip' ? p?.precip : field === 'temp' ? p?.temp : p?.clouds
+        vals[k] = arr?.[hi] ?? NaN
+      }
+      if (field === 'precip') {
+        vals = blurField(vals, n)
+        vals = blurField(vals, n)
+      } else if (field === 'clouds') {
+        vals = blurField(vals, n)
+      }
+
       const off = document.createElement('canvas')
       off.width = n
       off.height = n
@@ -180,9 +227,7 @@ export default function ForecastField() {
       const img = octx.createImageData(n, n)
       for (let i = 0; i < n; i++) {
         for (let j = 0; j < n; j++) {
-          const p = grid[i * n + j]
-          const arr = field === 'precip' ? p?.precip : field === 'temp' ? p?.temp : p?.clouds
-          const v = arr?.[hi] ?? NaN
+          const v = vals[i * n + j]
           let c: [number, number, number, number] = [0, 0, 0, 0]
           if (field === 'precip') c = precipColor(v)
           else if (field === 'clouds') c = cloudsColor(v)
@@ -200,9 +245,20 @@ export default function ForecastField() {
       }
       octx.putImageData(img, 0, 0)
 
+      // double upscale: n → mid (4n) → screen for continuous gradients
+      const mid = Math.min(n * 4, 160)
+      const midCanvas = document.createElement('canvas')
+      midCanvas.width = mid
+      midCanvas.height = mid
+      const mctx = midCanvas.getContext('2d')
+      if (!mctx) return
+      mctx.imageSmoothingEnabled = true
+      mctx.imageSmoothingQuality = 'high'
+      mctx.drawImage(off, 0, 0, mid, mid)
+
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'high'
-      ctx.drawImage(off, rx, ry, rw, rh)
+      ctx.drawImage(midCanvas, rx, ry, rw, rh)
 
       // value labels (zoom-aware density)
       if (field === 'clouds' || zoom < 4) return
@@ -219,19 +275,19 @@ export default function ForecastField() {
           const arr = field === 'precip' ? p?.precip : p?.temp
           const v = arr?.[hi] ?? NaN
           if (!Number.isFinite(v)) continue
-          if (field === 'precip' && v < 0.25) continue
+          if (field === 'precip' && v < 0.4) continue
           const pt = map.latLngToContainerPoint([p.lat, p.lon])
           if (pt.x < 10 || pt.x > w - 10 || pt.y < 10 || pt.y > h - 10) continue
           const label =
             field === 'precip' ? `${faNum(v, 1)}` : `${faNum(Math.round(v))}°`
           ctx.fillStyle =
             field === 'precip'
-              ? v >= 4
+              ? v >= 6
                 ? 'rgba(255,255,255,0.98)'
-                : 'rgba(240,255,245,0.92)'
+                : 'rgba(240,255,245,0.9)'
               : 'rgba(255,255,255,0.95)'
           ctx.fillText(label, pt.x, pt.y)
-          if (field === 'precip' && v >= 0.25) {
+          if (field === 'precip' && v >= 0.4) {
             ctx.fillStyle = 'rgba(255,255,255,0.6)'
             ctx.font = '500 8px Vazirmatn, Tahoma, sans-serif'
             ctx.fillText('mm', pt.x, pt.y + 9)

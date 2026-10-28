@@ -123,7 +123,7 @@ export default function FieldCanvas() {
       const latSpan = b.getNorth() - b.getSouth()
       const lonSpan = b.getEast() - b.getWest()
       const pad = 0.18
-      const res = window.innerWidth < 700 ? 14 : 22
+      // unified with ForecastField → one shared cache entry, Windy-grade 28×28 grid
       requestForecast(
         {
           latMin: Math.floor((b.getSouth() - latSpan * pad) * 2) / 2,
@@ -131,7 +131,7 @@ export default function FieldCanvas() {
           lonMin: Math.floor((b.getWest() - lonSpan * pad) * 2) / 2,
           lonMax: Math.ceil((b.getEast() + lonSpan * pad) * 2) / 2,
         },
-        res
+        28
       )
     }
     fetchBounds()

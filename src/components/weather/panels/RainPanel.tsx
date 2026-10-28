@@ -36,18 +36,27 @@ import { cn } from '@/lib/utils'
 
 const cardCls = 'glass gap-3 rounded-2xl border-border/40 p-4 shadow-none'
 
-/** bar color by mm/h intensity — mirrors the map precip ramp */
+/** bar color by mm/h intensity — mirrors the map precip ramp (Windy palette) */
 function rainBarColor(mm: number): string {
   if (!Number.isFinite(mm) || mm < 0.1) return 'rgba(120,150,170,0.25)'
-  if (mm < 0.3) return '#6ec969'
-  if (mm < 0.6) return '#2da05f'
-  if (mm < 1.2) return '#237dc8'
-  if (mm < 2.5) return '#2db9d7'
-  if (mm < 5) return '#fadc50'
-  if (mm < 10) return '#f5962d'
-  if (mm < 20) return '#e64137'
-  return '#c837a5'
+  if (mm < 0.5) return '#82e094'
+  if (mm < 1) return '#34c66c'
+  if (mm < 2) return '#2d8ceb'
+  if (mm < 6) return '#1e64d7'
+  if (mm < 10) return '#fae24e'
+  if (mm < 16) return '#fa9c2d'
+  if (mm < 26) return '#f03c2d'
+  if (mm < 45) return '#ba2238'
+  return '#5e106c'
 }
+
+const RAIN_BANDS: Array<[string, number]> = [
+  ['خفیف', 0.5],
+  ['متوسط', 2],
+  ['شدید', 6],
+  ['خیلی شدید', 16],
+  ['رگبار سیل‌آسا', 45],
+]
 
 function RainTip(props: {
   active?: boolean
@@ -377,20 +386,14 @@ function RainContent({ data }: { data: WeatherData }) {
         <div className="mt-3 rounded-xl border border-border/50 bg-muted/30 p-2.5">
           <p className="mb-1.5 text-[10px] font-bold text-muted-foreground">طبقه‌بندی شدت بارش (mm/h)</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
-            {[
-              ['کم‌بارش', '۰٫۳+'],
-              ['متوسط', '۱٫۲+'],
-              ['شدید', '۵+'],
-              ['خیلی شدید', '۱۵+'],
-              ['رگبار سیل‌آسا', '۲۵+'],
-            ].map(([label, val]) => (
+            {RAIN_BANDS.map(([label, mm]) => (
               <span key={label} className="flex items-center gap-1">
                 <span
                   className="h-2 w-2 rounded-full"
-                  style={{ background: rainBarColor(Number(val.replace(/[^0-9.]/g, ''))) }}
+                  style={{ background: rainBarColor(mm) }}
                   aria-hidden
                 />
-                {label} ({val} mm)
+                {label} ({faNum(mm, 1)}+ mm)
               </span>
             ))}
           </div>

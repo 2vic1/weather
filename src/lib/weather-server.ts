@@ -414,7 +414,7 @@ export async function fetchForecastField(
   const bLonMin = snapOut(lonMin, 'floor')
   const bLonMax = snapOut(lonMax, 'ceil')
 
-  const nn = Math.min(Math.max(Math.round(n), 8), 24)
+  const nn = Math.min(Math.max(Math.round(n), 8), 30)
   const ST = Math.min(Math.max(Math.round(stepHours), 1), 6)
 
   const key = `ff:${bLatMin}:${bLatMax}:${bLonMin}:${bLonMax}:${nn}:${ST}`
@@ -435,7 +435,7 @@ export async function fetchForecastField(
   const points: ForecastFieldResult['points'] = new Array(N)
   let times: string[] = []
 
-  const chunkSize = 40 // keep URLs short
+  const chunkSize = 100 // Open-Meteo allows up to 1000 coords/call — keep URLs compact
   const chunks: number[][] = []
   for (let i = 0; i < N; i += chunkSize) {
     chunks.push(Array.from({ length: Math.min(chunkSize, N - i) }, (_, k) => i + k))

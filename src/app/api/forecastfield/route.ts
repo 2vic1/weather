@@ -18,9 +18,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'bounds نامعتبر است' }, { status: 400 })
   }
 
-  // grid side capped at 24 → max 576 points (chunked upstream)
-  const size = parseFloat(sp.get('res') ?? '22')
-  const n = Math.min(Math.max(Math.round(size), 8), 24)
+  // grid side capped at 30 → max 900 points (chunked upstream, Windy-grade smoothness)
+  const size = parseFloat(sp.get('res') ?? '28')
+  const n = Math.min(Math.max(Math.round(size), 8), 30)
   const step = Math.min(Math.max(Math.round(parseFloat(sp.get('step') ?? '3')), 1), 6)
 
   try {
