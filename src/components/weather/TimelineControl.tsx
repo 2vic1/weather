@@ -348,7 +348,9 @@ export default function TimelineControl() {
     ? `+۱۵ روز`
     : isRadarMode
       ? '۳۰ دقیقه بعد'
-      : 'تصاویر روزانه'
+      : satelliteNoFrames
+        ? 'تصاویر روزانه'
+        : '۱۵ دقیقه‌ای زنده'
 
   return (
     <div
@@ -391,7 +393,7 @@ export default function TimelineControl() {
               ? 'bg-primary/25 text-primary font-bold'
               : 'text-muted-foreground hover:text-foreground'
           )}
-          title="ماهواره مادون قرمز"
+          title="ماهواره ابر زنده — هر ۱۵ دقیقه (Meteosat/GOES)"
         >
           <Satellite className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">ماهواره</span>

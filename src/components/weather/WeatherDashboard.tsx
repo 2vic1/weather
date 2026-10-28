@@ -177,7 +177,11 @@ export default function WeatherDashboard() {
 
         {/* mobile bottom sheet */}
         <Sheet open={mobilePanelOpen} onOpenChange={setMobilePanelOpen}>
-          <SheetContent side="bottom" className="glass-strong h-[72vh] rounded-t-3xl border-border/60 p-0">
+          <SheetContent
+            side="bottom"
+            aria-describedby={undefined}
+            className="glass-strong h-[72vh] rounded-t-3xl border-border/60 p-0"
+          >
             <SheetTitle className="sr-only">جزئیات هواشناسی</SheetTitle>
             <div className="flex justify-center pt-2">
               <div className="h-1.5 w-12 rounded-full bg-muted-foreground/40" />
@@ -192,7 +196,7 @@ export default function WeatherDashboard() {
       {/* ===== Footer (sticky bottom status bar) ===== */}
       <footer className="glass-strong relative z-[1100] mt-auto flex h-7 items-center justify-between px-3 text-[10px] text-muted-foreground sm:px-4" dir="rtl">
         <span className="truncate">
-          منابع: Open-Meteo (ECMWF/GFS/ICON) · RainViewer · EUMETSAT/NOAA · CARTO · Esri
+          منابع: Open-Meteo (ECMWF/GFS/ICON) · RainViewer · NASA GIBS · EUMETSAT/NOAA · Esri
         </span>
         <span className="hidden shrink-0 sm:block" dir="ltr">
           {faNum(new Date().toLocaleDateString('fa-IR'), 0)}

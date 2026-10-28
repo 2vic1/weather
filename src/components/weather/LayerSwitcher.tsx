@@ -16,6 +16,9 @@ import {
   Palette,
   CloudRainWind,
   Cloud,
+  Haze,
+  AirVent,
+  CloudLightning,
 } from 'lucide-react'
 // this lucide version has no Hurricane icon — Tornado is the closest match
 const Hurricane = Tornado
@@ -23,6 +26,7 @@ import { useState } from 'react'
 import { useWeatherStore, type BaseLayerId } from '@/store/weather-store'
 import { cn } from '@/lib/utils'
 import { tempColor } from '@/lib/weather-codes'
+import { aqColor, aqLabel, capeColor, capeLabel } from '@/lib/analysis-scale'
 
 const BASES: Array<{ id: BaseLayerId; label: string; icon: typeof Moon }> = [
   { id: 'dark', label: 'تیره', icon: Moon },
@@ -32,7 +36,17 @@ const BASES: Array<{ id: BaseLayerId; label: string; icon: typeof Moon }> = [
 ]
 
 const OVERLAYS: Array<{
-  id: 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx' | 'forecast'
+  id:
+    | 'radar'
+    | 'satellite'
+    | 'wind'
+    | 'temp'
+    | 'tropical'
+    | 'fx'
+    | 'forecast'
+    | 'dust'
+    | 'aq'
+    | 'cape'
   label: string
   source: string
   icon: typeof CloudRain
@@ -40,7 +54,10 @@ const OVERLAYS: Array<{
   { id: 'radar', label: 'رادار بارش (زمینی)', source: 'RainViewer', icon: CloudRain },
   { id: 'forecast', label: 'پیش‌بینی رنگی ۱۵ روز', source: 'Open-Meteo', icon: CloudRainWind },
   { id: 'tropical', label: 'حاره‌ای | طوفان‌ها', source: 'RainViewer', icon: Hurricane },
-  { id: 'satellite', label: 'ماهواره ابر (IR)', source: 'NASA GIBS', icon: SatelliteIcon },
+  { id: 'satellite', label: 'ماهواره ابر زنده (IR)', source: 'RainViewer', icon: SatelliteIcon },
+  { id: 'dust', label: 'گرد و غبار', source: 'NASA GIBS', icon: Haze },
+  { id: 'aq', label: 'کیفیت هوا (ذرات)', source: 'Open-Meteo', icon: AirVent },
+  { id: 'cape', label: 'ناپایداری و رعدوبرق', source: 'Open-Meteo', icon: CloudLightning },
   { id: 'wind', label: 'حرکت توده‌های هوا', source: 'Open-Meteo', icon: Wind },
   { id: 'temp', label: 'لایه دما', source: 'Open-Meteo', icon: Thermometer },
   { id: 'fx', label: 'جلوه‌های طوفانی', source: 'زنده', icon: Zap },
@@ -70,6 +87,13 @@ const FORECAST_FIELDS = [
 
 const PRECIP_LEGEND_CSS =
   'linear-gradient(90deg, rgba(170,215,150,.55) 0%, rgba(110,195,105,.6) 12%, rgba(45,160,95,.65) 25%, rgba(35,125,200,.68) 38%, rgba(45,185,215,.7) 50%, rgba(250,220,80,.75) 63%, rgba(245,150,45,.78) 76%, rgba(230,65,55,.82) 88%, rgba(200,55,165,.85) 100%)'
+
+const DUST_LEGEND_CSS =
+  'linear-gradient(90deg,#2c7bb6,#abd9e9,#ffffbf,#fdae61,#d7191c,#7f0000)'
+
+/** representative sample values per band → drives the legend rows automatically */
+const AQ_SAMPLES = [6, 25, 45, 100, 200, 300]
+const CAPE_SAMPLES = [100, 500, 1000, 1500, 2500, 3500]
 
 export default function LayerSwitcher() {
   const baseLayer = useWeatherStore((s) => s.baseLayer)
@@ -336,6 +360,77 @@ export default function LayerSwitcher() {
             <div className="mt-2 flex items-center gap-1.5 text-[9px] text-muted-foreground">
               <Wind className="h-3 w-3 text-cyan-300" />
               هر ذره = جریان باد سطحی؛ رنگ از آرام (آبی) تا شدید (نارنجی)
+            </div>
+          )}
+
+          {/* dust legend */}
+          {overlays.dust && (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                <Haze className="h-3 w-3 text-amber-300" />
+                شاخص غبار جوّی (Aerosol Index)
+              </div>
+              <div className="h-2 w-full rounded-full" style={{ background: DUST_LEGEND_CSS }} />
+              <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                <span>۰</span>
+                <span>۱</span>
+                <span>۲</span>
+                <span>۳</span>
+                <span>۴+</span>
+              </div>
+              <p className="mt-1.5 text-[9px] leading-4 text-muted-foreground">
+                تصویر روزانه ماهواره Suomi-NPP (دیشب UTC)؛ رنگ قرمز تیره = توفان گرد و غبار —
+                برای خوزستان، سیستان و ساحل خلیج فارس. در بزرگ‌نمایی زیاد محو می‌شود.
+              </p>
+            </div>
+          )}
+
+          {/* air quality legend */}
+          {overlays.aq && (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                <AirVent className="h-3 w-3 text-emerald-300" />
+                کیفیت هوا — PM۲٫۵ (µg/m³) · ۴۰ شهر
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                {AQ_SAMPLES.map((v) => (
+                  <div key={v} className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/30"
+                      style={{ background: aqColor(v) }}
+                    />
+                    <span className="truncate">{aqLabel(v)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[9px] leading-4 text-muted-foreground">
+                دایره‌ها را لمس کنید: جزئیات هواشناسی همان شهر باز می‌شود. غبار CAMS در تولتیپ نقاط
+                مستعد نشان داده می‌شود.
+              </p>
+            </div>
+          )}
+
+          {/* CAPE legend */}
+          {overlays.cape && (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                <CloudLightning className="h-3 w-3 text-orange-300" />
+                ناپایداری جوّی — CAPE (J/kg)
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                {CAPE_SAMPLES.map((v) => (
+                  <div key={v} className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/30"
+                      style={{ background: capeColor(v) }}
+                    />
+                    <span className="truncate">{capeLabel(v)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[9px] leading-4 text-muted-foreground">
+                حلقه‌های بزرگ = انرژی رعدوبرق زاگرس و شمال‌غرب؛ برای توفان‌های بهاری و پاییزی به‌کار می‌آید.
+              </p>
             </div>
           )}
 

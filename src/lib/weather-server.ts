@@ -1,22 +1,79 @@
 // Server-side Open-Meteo helpers with in-memory caching
+import https from 'node:https'
 import type { WeatherData, AtmosphereData } from './weather-types'
 
+const UA = 'AsmanNegar/1.0 (weather app)'
+
+/**
+ * IPv4-forced HTTPS GET with JSON parsing.
+ * Fallback for sandboxed hosts where the undici global fetch tries a broken
+ * IPv6 route first and fails (ETIMEDOUT/ENETUNREACH) even though IPv4 works.
+ */
+function https4Get<T>(url: string, timeoutMs = 15000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const req = https.get(
+      {
+        host: u.hostname,
+        path: u.pathname + u.search,
+        family: 4,
+        timeout: timeoutMs,
+        headers: { 'User-Agent': UA, Accept: 'application/json' },
+      },
+      (res) => {
+        if (!res.statusCode || res.statusCode >= 400) {
+          res.resume()
+          reject(new Error(`Upstream fetch failed: ${res.statusCode ?? '?'}`))
+          return
+        }
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (c) => (body += c))
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body) as T)
+          } catch (e) {
+            reject(e as Error)
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.on('timeout', () => req.destroy(new Error('upstream timeout')))
+  })
+}
+
 const cache = new Map<string, { data: unknown; ts: number }>()
+
+async function rawFetch<T>(url: string): Promise<T> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(15000),
+    headers: { 'User-Agent': UA },
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    throw new Error(`Upstream fetch failed: ${res.status}`)
+  }
+  return (await res.json()) as T
+}
 
 export async function cachedFetch<T>(key: string, url: string, ttlMs: number): Promise<T> {
   const hit = cache.get(key)
   const now = Date.now()
   if (hit && now - hit.ts < ttlMs) return hit.data as T
 
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(15000),
-    headers: { 'User-Agent': 'AsmanNegar/1.0 (weather app)' },
-    cache: 'no-store',
-  })
-  if (!res.ok) {
-    throw new Error(`Upstream fetch failed: ${res.status}`)
+  let data: T
+  try {
+    data = await rawFetch<T>(url)
+  } catch {
+    // global fetch failed → IPv4-forced fallback, then one retry after a beat
+    try {
+      data = await https4Get<T>(url)
+    } catch {
+      await new Promise((r) => setTimeout(r, 900))
+      data = await https4Get<T>(url)
+    }
   }
-  const data = (await res.json()) as T
   cache.set(key, { data, ts: now })
   // prune old entries
   if (cache.size > 500) {

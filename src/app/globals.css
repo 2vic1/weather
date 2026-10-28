@@ -200,6 +200,21 @@
 .leaflet-tooltip.city-label::before {
   display: none;
 }
+/* analysis dots (AQ / CAPE) hover tooltip */
+.leaflet-tooltip.analysis-tooltip {
+  background: oklch(0.21 0.032 245 / 96%);
+  color: oklch(0.95 0.008 240);
+  border: 1px solid oklch(0.55 0.05 200 / 40%);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px oklch(0 0 0 / 45%);
+  backdrop-filter: blur(10px);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.leaflet-tooltip.analysis-tooltip::before {
+  display: none;
+}
 .leaflet-popup-content-wrapper {
   background: oklch(0.21 0.032 245 / 96%);
   color: oklch(0.95 0.008 240);

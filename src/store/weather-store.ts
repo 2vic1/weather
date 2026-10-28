@@ -9,7 +9,17 @@ import type {
 } from '@/lib/weather-types'
 
 export type BaseLayerId = 'dark' | 'light' | 'satellite' | 'terrain'
-export type OverlayId = 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx' | 'forecast'
+export type OverlayId =
+  | 'radar'
+  | 'satellite'
+  | 'wind'
+  | 'temp'
+  | 'tropical'
+  | 'fx'
+  | 'forecast'
+  | 'dust'
+  | 'aq'
+  | 'cape'
 export type TimelineMode = 'radar' | 'satellite' | 'forecast'
 export type SidebarTab = 'current' | 'hourly' | 'daily' | 'rain' | 'atmosphere' | 'ai'
 
@@ -106,6 +116,9 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
     tropical: false,
     fx: true,
     forecast: false,
+    dust: false,
+    aq: false,
+    cape: false,
   },
   toggleOverlay: (id) =>
     set((s) => ({ overlays: { ...s.overlays, [id]: !s.overlays[id] } })),
@@ -140,7 +153,11 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
       satFrames,
       host: d.host,
       frameIndex: Math.min(Math.max(frames.length - 4, 0), Math.max(frames.length - 1, 0)),
-      satIndex: Math.min(s.satIndex, Math.max(satFrames.length - 1, 0)),
+      // first load → jump to the newest IR frame (otherwise stays on the oldest)
+      satIndex:
+        s.satFrames.length === 0
+          ? Math.max(satFrames.length - 1, 0)
+          : Math.min(s.satIndex, Math.max(satFrames.length - 1, 0)),
     }))
   },
 

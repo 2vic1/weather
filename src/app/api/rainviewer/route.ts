@@ -20,7 +20,7 @@ export async function GET() {
         past: (raw.radar?.past ?? []).slice(-9),
         nowcast: raw.radar?.nowcast ?? [],
       },
-      satellite: (raw.satellite?.infrared ?? []).slice(-9),
+      satellite: (raw.satellite?.infrared ?? []).slice(-12),
     })
   } catch (e) {
     console.error('rainviewer error', e)

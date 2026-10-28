@@ -21,6 +21,8 @@ import AnimatedTiles from './AnimatedTiles'
 import WindParticles from './WindParticles'
 import FieldCanvas from './FieldCanvas'
 import StormEffects from './StormEffects'
+import DustTiles from './DustTiles'
+import AnalysisCircles from './AnalysisCircles'
 
 const BASE_LAYERS: Record<
   string,
@@ -257,10 +259,12 @@ export default function MapPanel() {
       <ScaleControl position="bottomleft" metric imperial={false} />
       <CityMarkers />
       <SelectedMarker />
+      <DustTiles />
       <AnimatedTiles />
       <WindParticles />
       <FieldCanvas />
       <StormEffects />
+      <AnalysisCircles />
       <MapController />
       <ViewTracker />
     </MapContainer>

@@ -142,6 +142,44 @@ export interface ForecastFieldData {
   fetchedAt: string
 }
 
+// ===== AQ / CAPE analysis dots (province centers + hotspots) =====
+
+export interface AQPoint {
+  name: string
+  province: string
+  lat: number
+  lon: number
+  /** PM2.5 µg/m³ (current hour) */
+  pm25: number
+  /** PM10 µg/m³ */
+  pm10: number
+  /** CAMS dust µg/m³ */
+  dust: number
+  hot: boolean
+}
+
+export interface CapePoint {
+  name: string
+  province: string
+  lat: number
+  lon: number
+  /** CAPE J/kg (current) */
+  cape: number
+  hot: boolean
+}
+
+export interface AnalysisFieldData {
+  aq: {
+    time: string
+    points: AQPoint[]
+  }
+  cape: {
+    time: string
+    points: CapePoint[]
+  }
+  fetchedAt: string
+}
+
 // ===== AI analysis =====
 
 export interface AIAnalysis {
