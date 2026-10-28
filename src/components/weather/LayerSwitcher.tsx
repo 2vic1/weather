@@ -110,10 +110,13 @@ export default function LayerSwitcher() {
   }
 
   return (
-    <div className="glass-strong pointer-events-auto w-56 rounded-2xl" dir="rtl">
+    <div
+      className="glass-strong pointer-events-auto flex max-h-[calc(100dvh-180px)] w-56 flex-col rounded-2xl"
+      dir="rtl"
+    >
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-3 py-2.5 text-sm font-bold"
+        className="flex w-full shrink-0 items-center justify-between px-3 py-2.5 text-sm font-bold"
       >
         <span className="flex items-center gap-2">
           <Layers className="h-4 w-4 text-primary" />
@@ -125,7 +128,7 @@ export default function LayerSwitcher() {
       </button>
 
       {open && (
-        <div className="px-3 pb-3">
+        <div className="nice-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
           {/* base layers */}
           <div className="mb-1 text-[10px] font-bold text-muted-foreground">نقشه پایه</div>
           <div className="mb-3 grid grid-cols-4 gap-1.5">
