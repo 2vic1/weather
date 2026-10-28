@@ -19,8 +19,7 @@ import type { CityPoint } from '@/lib/weather-types'
 import { faNum } from '@/lib/format'
 import AnimatedTiles from './AnimatedTiles'
 import WindParticles from './WindParticles'
-import TempHeatmap from './TempHeatmap'
-import ForecastField from './ForecastField'
+import FieldCanvas from './FieldCanvas'
 import StormEffects from './StormEffects'
 
 const BASE_LAYERS: Record<
@@ -242,8 +241,7 @@ export default function MapPanel() {
       <SelectedMarker />
       <AnimatedTiles />
       <WindParticles />
-      <TempHeatmap />
-      <ForecastField />
+      <FieldCanvas />
       <StormEffects />
       <MapController />
     </MapContainer>

@@ -101,8 +101,12 @@ export default function WeatherDashboard() {
           </div>
         </div>
 
-        {/* timeline bottom center */}
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[1000] w-[min(94vw,560px)] -translate-x-1/2">
+        {/* timeline bottom center — centered between the side panels on desktop */}
+        <div
+          className={`pointer-events-none absolute bottom-4 left-1/2 z-[1000] w-[min(94vw,560px)] -translate-x-1/2 ${
+            desktopPanel ? 'lg:translate-x-[calc(-50%_-_82px)]' : ''
+          }`}
+        >
           <TimelineControl />
         </div>
 

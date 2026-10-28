@@ -38,7 +38,7 @@ const OVERLAYS: Array<{
   icon: typeof CloudRain
 }> = [
   { id: 'radar', label: 'رادار بارش (زمینی)', source: 'RainViewer', icon: CloudRain },
-  { id: 'forecast', label: 'پیش‌بینی رنگی ۴۸س', source: 'Open-Meteo', icon: CloudRainWind },
+  { id: 'forecast', label: 'پیش‌بینی رنگی ۱۵ روز', source: 'Open-Meteo', icon: CloudRainWind },
   { id: 'tropical', label: 'حاره‌ای | طوفان‌ها', source: 'RainViewer', icon: Hurricane },
   { id: 'satellite', label: 'ماهواره ابر (IR)', source: 'NASA GIBS', icon: SatelliteIcon },
   { id: 'wind', label: 'حرکت توده‌های هوا', source: 'Open-Meteo', icon: Wind },
@@ -189,7 +189,7 @@ export default function LayerSwitcher() {
             <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-2">
               <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-emerald-300">
                 <CloudRainWind className="h-3 w-3" />
-                لایه پیش‌بینی ۴۸ ساعت آینده
+                لایه پیش‌بینی ۱۵ روز آینده
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {FORECAST_FIELDS.map(({ id, label, icon: Icon }) => (
@@ -255,7 +255,8 @@ export default function LayerSwitcher() {
               )}
 
               <p className="mt-2 text-[9px] leading-4 text-emerald-200/70">
-                دکمه پخش را بزنید تا حرکت رنگ‌ها در ۴۸ ساعت آینده را ببینید — دقیقاً مثل ویندی.
+                میله زمان پایین صفحه را با موس بکشید — از «امروز» تا ۱۵ روز آینده؛ لایه‌های رنگی بر
+                اساس دیتای مدل جابه‌جا می‌شوند. دکمه پخش را هم بزنید تا حرکت سامانه‌ها را ببینید.
               </p>
             </div>
           )}
