@@ -118,6 +118,30 @@ export interface RainViewerData {
   satellite: RvFrame[]
 }
 
+// ===== Forecast field (animated model layers: precip / temp / clouds) =====
+
+export type ForecastFieldId = 'precip' | 'temp' | 'clouds'
+
+export interface ForecastFieldPoint {
+  lat: number
+  lon: number
+  /** mm/h precipitation per hour */
+  precip: number[]
+  /** °C temperature per hour */
+  temp: number[]
+  /** % cloud cover per hour */
+  clouds: number[]
+}
+
+export interface ForecastFieldData {
+  /** UTC ISO time strings, shared by all points */
+  times: string[]
+  points: ForecastFieldPoint[]
+  n: number
+  bounds: { latMin: number; latMax: number; lonMin: number; lonMax: number }
+  fetchedAt: string
+}
+
 // ===== AI analysis =====
 
 export interface AIAnalysis {

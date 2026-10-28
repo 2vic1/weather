@@ -72,6 +72,28 @@ export function unixToFaTime(unix: number): string {
   return faNum(hh)
 }
 
+const WD_MAP: Record<string, string> = {
+  Sun: 'یکشنبه', Mon: 'دوشنبه', Tue: 'سه‌شنبه', Wed: 'چهارشنبه',
+  Thu: 'پنجشنبه', Fri: 'جمعه', Sat: 'شنبه',
+}
+
+/** UTC ISO hour string (e.g. "2025-11-02T14:00") → Tehran weekday + hh:mm in Persian */
+export function faTehranHour(isoUtc: string): string {
+  const d = new Date(`${isoUtc.endsWith('Z') ? isoUtc : `${isoUtc}Z`}`)
+  if (Number.isNaN(d.getTime())) return '—'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  const wd = WD_MAP[get('weekday')] ?? ''
+  const hh = get('hour') === '24' ? '00' : get('hour')
+  return `${wd} ${faNum(hh)}:${faNum(get('minute'))}`
+}
+
 export function windDirArrow(deg: number): string {
   // Meteorological direction = where wind comes FROM. Arrow shows where it goes.
   const arrows = ['↓', '↙', '←', '↖', '↑', '↗', '→', '↘']

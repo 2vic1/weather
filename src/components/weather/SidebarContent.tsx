@@ -4,6 +4,7 @@ import {
   ThermometerSun,
   Clock3,
   CalendarDays,
+  CloudRain,
   Layers3,
   Sparkles,
   MapPin,
@@ -15,6 +16,7 @@ import { useWeather } from '@/hooks/use-weather-data'
 import { CurrentPanel, HourlyPanel, DailyPanel } from './panels/WeatherPanels'
 import AtmospherePanel from './panels/AtmospherePanel'
 import AIPanel from './panels/AIPanel'
+import RainPanel from './panels/RainPanel'
 import { cn } from '@/lib/utils'
 import { faNum } from '@/lib/format'
 
@@ -22,6 +24,7 @@ const TABS: Array<{ id: SidebarTab; label: string; icon: typeof ThermometerSun }
   { id: 'current', label: 'اکنون', icon: ThermometerSun },
   { id: 'hourly', label: 'ساعتی', icon: Clock3 },
   { id: 'daily', label: '۷ روزه', icon: CalendarDays },
+  { id: 'rain', label: 'بارش', icon: CloudRain },
   { id: 'atmosphere', label: 'لایه‌های جو', icon: Layers3 },
   { id: 'ai', label: 'هوش مصنوعی', icon: Sparkles },
 ]
@@ -96,6 +99,7 @@ export default function SidebarContent() {
         {tab === 'current' && <CurrentPanel />}
         {tab === 'hourly' && <HourlyPanel />}
         {tab === 'daily' && <DailyPanel />}
+        {tab === 'rain' && <RainPanel />}
         {tab === 'atmosphere' && <AtmospherePanel />}
         {tab === 'ai' && <AIPanel />}
       </div>

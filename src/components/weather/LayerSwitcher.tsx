@@ -14,6 +14,8 @@ import {
   Tornado,
   Zap,
   Palette,
+  CloudRainWind,
+  Cloud,
 } from 'lucide-react'
 // this lucide version has no Hurricane icon — Tornado is the closest match
 const Hurricane = Tornado
@@ -30,12 +32,13 @@ const BASES: Array<{ id: BaseLayerId; label: string; icon: typeof Moon }> = [
 ]
 
 const OVERLAYS: Array<{
-  id: 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx'
+  id: 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx' | 'forecast'
   label: string
   source: string
   icon: typeof CloudRain
 }> = [
-  { id: 'radar', label: 'رادار بارش', source: 'RainViewer', icon: CloudRain },
+  { id: 'radar', label: 'رادار بارش (زمینی)', source: 'RainViewer', icon: CloudRain },
+  { id: 'forecast', label: 'پیش‌بینی رنگی ۴۸س', source: 'Open-Meteo', icon: CloudRainWind },
   { id: 'tropical', label: 'حاره‌ای | طوفان‌ها', source: 'RainViewer', icon: Hurricane },
   { id: 'satellite', label: 'ماهواره ابر (IR)', source: 'NASA GIBS', icon: SatelliteIcon },
   { id: 'wind', label: 'حرکت توده‌های هوا', source: 'Open-Meteo', icon: Wind },
@@ -43,16 +46,30 @@ const OVERLAYS: Array<{
   { id: 'fx', label: 'جلوه‌های طوفانی', source: 'زنده', icon: Zap },
 ]
 
-/** Approximate gradient swatches for RainViewer palettes 0..6 */
+/**
+ * RainViewer color palettes — REAL palette ids 0..8 used in the tile URL.
+ * https://www.rainviewer.com/api/color-schemes.html
+ */
 const PALETTES: Array<{ id: number; label: string; swatch: string }> = [
-  { id: 0, label: 'آبی جهانی', swatch: 'linear-gradient(90deg,#1d3f8f,#2f9bd8,#42d6c8,#a8e05f,#f9d64a)' },
-  { id: 1, label: 'تایتان', swatch: 'linear-gradient(90deg,#0b5e20,#2ecc40,#f1c40f,#e67e22,#c0392b)' },
-  { id: 2, label: 'کانال آب‌وهوا', swatch: 'linear-gradient(90deg,#16a085,#27ae60,#f4d03f,#e74c3c,#8e44ad)' },
-  { id: 3, label: 'متئورد', swatch: 'linear-gradient(90deg,#cfe8ff,#7fc8f8,#4aa5e0,#f5b041,#d35400)' },
-  { id: 4, label: 'نکس‌رَد', swatch: 'linear-gradient(90deg,#00c853,#ffeb3b,#ff9800,#f44336,#9c27b0)' },
-  { id: 5, label: 'رنگین‌کمان', swatch: 'linear-gradient(90deg,#2962ff,#00bcd4,#4caf50,#ffeb3b,#ff5722,#d500f9)' },
-  { id: 6, label: 'دارک‌اسکای', swatch: 'linear-gradient(90deg,#0d47a1,#00acc1,#26c6da,#ffee58,#ff7043)' },
+  { id: 0, label: 'سیاه‌وسفید dBZ', swatch: 'linear-gradient(90deg,#0b0f14,#5c6672,#b9c2cc,#ffffff)' },
+  { id: 1, label: 'اصلی (NWS)', swatch: 'linear-gradient(90deg,#04e9e7,#019ff4,#0300f4,#02fd02,#01c501,#008e00,#fdf802,#fd9500,#fd0000,#f800fd)' },
+  { id: 2, label: 'آبی جهانی', swatch: 'linear-gradient(90deg,#8ecaff,#2f9bd8,#42d6c8,#a8e05f,#f9d64a,#f95d4a,#d371dd)' },
+  { id: 3, label: 'تایتان', swatch: 'linear-gradient(90deg,#21a358,#64b332,#ffd700,#ff8c00,#ff0000,#c0c0c0)' },
+  { id: 4, label: 'کانال آب‌وهوا', swatch: 'linear-gradient(90deg,#04e9e7,#00b300,#fdf802,#fd9500,#fd0000,#f800fd)' },
+  { id: 5, label: 'مت استونی', swatch: 'linear-gradient(90deg,#a1d0ff,#4a92ff,#32c800,#f4c800,#ff8000,#ff0000,#b40000)' },
+  { id: 6, label: 'متئورد', swatch: 'linear-gradient(90deg,#cfe8ff,#7fc8f8,#3f8fe0,#26c281,#f7e347,#f5a623,#e04b3a,#9c27b0)' },
+  { id: 7, label: 'نکس‌رَد', swatch: 'linear-gradient(90deg,#00c853,#ffeb3b,#ff9800,#f44336,#9c27b0)' },
+  { id: 8, label: 'رنگین‌کمان', swatch: 'linear-gradient(90deg,#2962ff,#00bcd4,#4caf50,#ffeb3b,#ff5722,#d500f9)' },
 ]
+
+const FORECAST_FIELDS = [
+  { id: 'precip', label: 'بارش', icon: CloudRain },
+  { id: 'temp', label: 'دما', icon: Thermometer },
+  { id: 'clouds', label: 'ابر', icon: Cloud },
+] as const
+
+const PRECIP_LEGEND_CSS =
+  'linear-gradient(90deg, rgba(170,215,150,.55) 0%, rgba(110,195,105,.6) 12%, rgba(45,160,95,.65) 25%, rgba(35,125,200,.68) 38%, rgba(45,185,215,.7) 50%, rgba(250,220,80,.75) 63%, rgba(245,150,45,.78) 76%, rgba(230,65,55,.82) 88%, rgba(200,55,165,.85) 100%)'
 
 export default function LayerSwitcher() {
   const baseLayer = useWeatherStore((s) => s.baseLayer)
@@ -63,10 +80,13 @@ export default function LayerSwitcher() {
   const setTimelineMode = useWeatherStore((s) => s.setTimelineMode)
   const radarColor = useWeatherStore((s) => s.radarColor)
   const setRadarColor = useWeatherStore((s) => s.setRadarColor)
+  const forecastField = useWeatherStore((s) => s.forecastField)
+  const setForecastField = useWeatherStore((s) => s.setForecastField)
+  const setPlaying = useWeatherStore((s) => s.setPlaying)
   const flyTo = useWeatherStore((s) => s.flyTo)
   const [open, setOpen] = useState(true)
 
-  const paletteVisible = overlays.radar || overlays.tropical
+  const radarPaletteVisible = (overlays.radar || overlays.tropical) && timelineMode === 'radar'
 
   const handleOverlay = (id: (typeof OVERLAYS)[number]['id']) => {
     const turningOn = !overlays[id]
@@ -78,6 +98,11 @@ export default function LayerSwitcher() {
       if (timelineMode !== 'radar') setTimelineMode('radar')
       if (!overlays.fx) toggleOverlay('fx')
       flyTo(14, 62, 4)
+    }
+    if (id === 'forecast' && turningOn) {
+      // animated model timeline — auto-play like Windy
+      setTimelineMode('forecast')
+      setPlaying(true)
     }
   }
 
@@ -126,7 +151,7 @@ export default function LayerSwitcher() {
           <div className="flex flex-col gap-1">
             {OVERLAYS.map(({ id, label, source, icon: Icon }) => {
               const on = overlays[id]
-              const active = on && (id === 'radar' || id === 'satellite') && timelineMode !== id
+              const active = on && (id === 'radar' || id === 'satellite' || id === 'forecast') && timelineMode !== id
               return (
                 <button
                   key={id}
@@ -159,8 +184,84 @@ export default function LayerSwitcher() {
             })}
           </div>
 
+          {/* ===== forecast field selector + legends ===== */}
+          {overlays.forecast && (
+            <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-emerald-300">
+                <CloudRainWind className="h-3 w-3" />
+                لایه پیش‌بینی ۴۸ ساعت آینده
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {FORECAST_FIELDS.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setForecastField(id)}
+                    className={cn(
+                      'flex flex-col items-center gap-1 rounded-lg border px-1 py-1.5 text-[10px] transition-all',
+                      forecastField === id
+                        ? 'border-emerald-400/70 bg-emerald-400/15 font-bold text-emerald-200'
+                        : 'border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/60'
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {forecastField === 'precip' && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[9px] text-muted-foreground">شدت بارش (mm/h)</div>
+                  <div className="h-2 w-full rounded-full" style={{ background: PRECIP_LEGEND_CSS }} />
+                  <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                    <span>۰٫۱</span>
+                    <span>۱</span>
+                    <span>۵</span>
+                    <span>۱۰</span>
+                    <span>۲۰</span>
+                    <span>۴۰+</span>
+                  </div>
+                </div>
+              )}
+              {forecastField === 'temp' && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[9px] text-muted-foreground">دمای ۲ متری (°C)</div>
+                  <div
+                    className="h-2 w-full rounded-full"
+                    style={{
+                      background: `linear-gradient(to left, rgb(${tempColor(-15).join(',')}), rgb(${tempColor(0).join(',')}), rgb(${tempColor(10).join(',')}), rgb(${tempColor(20).join(',')}), rgb(${tempColor(30).join(',')}), rgb(${tempColor(42).join(',')}))`,
+                    }}
+                  />
+                  <div className="flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                    <span>-۱۵</span>
+                    <span>۰</span>
+                    <span>۱۰</span>
+                    <span>۲۰</span>
+                    <span>۳۰</span>
+                    <span>+۴۲</span>
+                  </div>
+                </div>
+              )}
+              {forecastField === 'clouds' && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[9px] text-muted-foreground">پوشش ابر (٪)</div>
+                  <div className="h-2 w-full rounded-full bg-gradient-to-l from-slate-200/70 to-slate-600/70" />
+                  <div className="flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                    <span>۰</span>
+                    <span>۵۰</span>
+                    <span>۱۰۰</span>
+                  </div>
+                </div>
+              )}
+
+              <p className="mt-2 text-[9px] leading-4 text-emerald-200/70">
+                دکمه پخش را بزنید تا حرکت رنگ‌ها در ۴۸ ساعت آینده را ببینید — دقیقاً مثل ویندی.
+              </p>
+            </div>
+          )}
+
           {/* radar / tropical color palette */}
-          {paletteVisible && (
+          {radarPaletteVisible && (
             <div className="mt-3 rounded-xl border border-border/50 bg-muted/20 p-2">
               <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
                 <Palette className="h-3 w-3 text-primary" />
@@ -187,6 +288,10 @@ export default function LayerSwitcher() {
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-[9px] leading-4 text-muted-foreground">
+                توجه: رادار زمینی ایران محدود است (پوشش اصلی: بندرعباس و چند ایستگاه دیگر). برای
+                پوشش کامل و دقیق کل ایران حالت «پیش‌بینی رنگی ۴۸س» را فعال کنید.
+              </p>
             </div>
           )}
 
@@ -198,8 +303,8 @@ export default function LayerSwitcher() {
             </div>
           )}
 
-          {/* temp legend */}
-          {overlays.temp && (
+          {/* temp legend (static current-hour layer) */}
+          {overlays.temp && timelineMode !== 'forecast' && (
             <div className="mt-3">
               <div className="mb-1 text-[9px] text-muted-foreground">مقیاس دما (°C)</div>
               <div

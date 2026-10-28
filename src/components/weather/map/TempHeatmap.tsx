@@ -15,7 +15,10 @@ import { faNum } from '@/lib/format'
 
 export default function TempHeatmap() {
   const map = useMap()
-  const active = useWeatherStore((s) => s.overlays.temp)
+  const tempOverlay = useWeatherStore((s) => s.overlays.temp)
+  const timelineMode = useWeatherStore((s) => s.timelineMode)
+  // forecast mode has its own animated temp field — avoid double rendering
+  const active = tempOverlay && timelineMode !== 'forecast'
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [gridTick, setGridTick] = useState(0)
 

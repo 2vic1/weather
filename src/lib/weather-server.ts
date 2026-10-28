@@ -306,3 +306,107 @@ export async function fetchTempField(
     n,
   }
 }
+
+// ===== Animated forecast field (precip / temp / clouds grid × hourly) =====
+
+export interface ForecastFieldResult {
+  times: string[]
+  points: Array<{ lat: number; lon: number; precip: number[]; temp: number[]; clouds: number[] }>
+  n: number
+}
+
+/** Assembled-result cache (separate from raw URL cache) */
+const ffCache = new Map<string, { data: ForecastFieldResult; ts: number }>()
+const FF_TTL = 12 * 60_000
+
+export async function fetchForecastField(
+  latMin: number,
+  latMax: number,
+  lonMin: number,
+  lonMax: number,
+  n = 20,
+  hours = 49
+): Promise<ForecastFieldResult> {
+  const key = `ff:${round1(latMin)}:${round1(latMax)}:${round1(lonMin)}:${round1(lonMax)}:${n}:${hours}`
+  const hit = ffCache.get(key)
+  if (hit && Date.now() - hit.ts < FF_TTL) return hit.data
+
+  const nn = Math.min(Math.max(Math.round(n), 8), 20)
+  const H = Math.min(Math.max(Math.round(hours), 12), 49)
+
+  // build lat/lon lattice (row-major: lat rows × lon cols)
+  const lats: number[] = []
+  const lons: number[] = []
+  for (let i = 0; i < nn; i++) {
+    for (let j = 0; j < nn; j++) {
+      lats.push(round2(latMin + ((latMax - latMin) * i) / (nn - 1)))
+      lons.push(round2(lonMin + ((lonMax - lonMin) * j) / (nn - 1)))
+    }
+  }
+
+  const N = lats.length
+  const points: ForecastFieldResult['points'] = new Array(N)
+  let times: string[] = []
+
+  const chunkSize = 40 // keep URLs short
+  const chunks: number[][] = []
+  for (let i = 0; i < N; i += chunkSize) {
+    chunks.push(Array.from({ length: Math.min(chunkSize, N - i) }, (_, k) => i + k))
+  }
+
+  const fetchChunk = async (idx: number[]): Promise<void> => {
+    const params = new URLSearchParams({
+      latitude: idx.map((i) => lats[i]).join(','),
+      longitude: idx.map((i) => lons[i]).join(','),
+      hourly: 'precipitation,temperature_2m,cloud_cover',
+      forecast_hours: String(H),
+      timezone: 'UTC',
+    })
+    const url = `https://api.open-meteo.com/v1/forecast?${params}`
+    const raw = await cachedFetch<unknown>(`ffr:${idx.map((i) => `${lats[i]},${lons[i]}`).join(';')}`, url, FF_TTL)
+    const arr = (Array.isArray(raw) ? raw : [raw]) as Array<{
+      hourly?: { time?: string[]; precipitation?: (number | null)[]; temperature_2m?: (number | null)[]; cloud_cover?: (number | null)[] }
+    }>
+    for (let k = 0; k < idx.length; k++) {
+      const h = arr[k]?.hourly
+      if (!h?.time) continue
+      const t = h.time
+      const val = (a: (number | null)[] | undefined, i: number) => (a && a[i] != null ? a[i] : NaN) as number
+      points[idx[k]] = {
+        lat: lats[idx[k]],
+        lon: lons[idx[k]],
+        precip: t.map((_, i) => val(h.precipitation, i)),
+        temp: t.map((_, i) => val(h.temperature_2m, i)),
+        clouds: t.map((_, i) => val(h.cloud_cover, i)),
+      }
+      if (t.length > times.length) times = t
+    }
+  }
+
+  await Promise.all(chunks.map((c) => fetchChunk(c).catch(() => {})))
+
+  // fill any missing points with NaN series so grid stays aligned
+  for (let i = 0; i < N; i++) {
+    if (!points[i]) {
+      points[i] = {
+        lat: lats[i],
+        lon: lons[i],
+        precip: times.map(() => NaN),
+        temp: times.map(() => NaN),
+        clouds: times.map(() => NaN),
+      }
+    }
+  }
+
+  const data: ForecastFieldResult = { times, points, n: nn }
+  ffCache.set(key, { data, ts: Date.now() })
+  if (ffCache.size > 40) {
+    const now = Date.now()
+    for (const [k, v] of ffCache) if (now - v.ts > FF_TTL) ffCache.delete(k)
+  }
+  return data
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}

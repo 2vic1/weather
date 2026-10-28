@@ -1,11 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Radar, Satellite } from 'lucide-react'
+import { Play, Pause, Radar, Satellite, CloudRainWind } from 'lucide-react'
 import { useWeatherStore } from '@/store/weather-store'
 import type { RainViewerData } from '@/lib/weather-types'
-import { unixToFaTime } from '@/lib/format'
+import { unixToFaTime, faTehranHour, faNum } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { getForecastState, useForecastState } from './map/forecastCache'
+
+const FIELD_LABEL: Record<string, string> = {
+  precip: 'بارش',
+  temp: 'دما',
+  clouds: 'ابر',
+}
 
 export default function TimelineControl() {
   const timelineMode = useWeatherStore((s) => s.timelineMode)
@@ -21,11 +28,16 @@ export default function TimelineControl() {
   const setRainViewer = useWeatherStore((s) => s.setRainViewer)
   const overlays = useWeatherStore((s) => s.overlays)
   const toggleOverlay = useWeatherStore((s) => s.toggleOverlay)
+  const forecastHour = useWeatherStore((s) => s.forecastHour)
+  const setForecastHour = useWeatherStore((s) => s.setForecastHour)
+  const forecastField = useWeatherStore((s) => s.forecastField)
+  const fc = useForecastState()
 
   const [error, setError] = useState(false)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const isRadarMode = timelineMode === 'radar'
+  const isForecastMode = timelineMode === 'forecast'
   const modeFrames = isRadarMode ? frames : satFrames
 
   // fetch rainviewer frames
@@ -48,31 +60,46 @@ export default function TimelineControl() {
     }
   }, [setRainViewer])
 
-  // autoplay loop
+  // autoplay loop (radar/satellite frames or forecast hours)
   useEffect(() => {
-    if (!playing || modeFrames.length === 0) {
+    if (!playing) {
       if (tickRef.current) clearInterval(tickRef.current)
       return
     }
+    if (isForecastMode) {
+      if (fc.times.length === 0) return
+      tickRef.current = setInterval(() => {
+        const s = useWeatherStore.getState()
+        const len = getForecastState().times.length
+        if (len > 0) s.setForecastHour((s.forecastHour + 1) % len)
+      }, 700)
+      return () => {
+        if (tickRef.current) clearInterval(tickRef.current)
+      }
+    }
+    if (modeFrames.length === 0) return
     tickRef.current = setInterval(() => {
       const s = useWeatherStore.getState()
       if (s.timelineMode === 'radar') {
         s.setFrameIndex((s.frameIndex + 1) % s.frames.length)
-      } else {
-        if (s.satFrames.length > 0) s.setSatIndex((s.satIndex + 1) % s.satFrames.length)
+      } else if (s.satFrames.length > 0) {
+        s.setSatIndex((s.satIndex + 1) % s.satFrames.length)
       }
     }, 750)
     return () => {
       if (tickRef.current) clearInterval(tickRef.current)
     }
-  }, [playing, modeFrames.length])
+  }, [playing, isForecastMode, modeFrames.length, fc.times.length])
 
-  const selectMode = (m: 'radar' | 'satellite') => {
-    if (timelineMode !== m) {
-      setTimelineMode(m)
-      // ensure corresponding overlay on
-      if (m === 'radar' && !overlays.radar && !overlays.tropical) toggleOverlay('radar')
-      if (m === 'satellite' && !overlays.satellite) toggleOverlay('satellite')
+  const selectMode = (m: 'radar' | 'satellite' | 'forecast') => {
+    if (timelineMode === m) return
+    setTimelineMode(m)
+    if (m === 'radar' && !overlays.radar && !overlays.tropical) toggleOverlay('radar')
+    if (m === 'satellite' && !overlays.satellite) toggleOverlay('satellite')
+    if (m === 'forecast') {
+      if (!overlays.forecast) toggleOverlay('forecast')
+      useWeatherStore.getState().setForecastHour(0)
+      setPlaying(true)
     }
   }
 
@@ -89,10 +116,22 @@ export default function TimelineControl() {
       ? Math.max(0, Math.round((frame.time - modeFrames[lastPastIdx].time) / 60))
       : 0
 
-  const satelliteNoFrames =
-    timelineMode === 'satellite' && satFrames.length === 0
-  const timeLabel =
-    modeFrames.length === 0
+  const satelliteNoFrames = timelineMode === 'satellite' && satFrames.length === 0
+
+  const fcLen = fc.times.length
+  const fcMax = Math.max(fcLen - 1, 0)
+  const fcHour = Math.min(forecastHour, fcMax)
+  const fcReady = isForecastMode && fcLen > 0
+
+  const timeLabel = isForecastMode
+    ? fc.error
+      ? 'خطا در دریافت پیش‌بینی'
+      : fcLen === 0
+        ? 'در حال دریافت میدان پیش‌بینی...'
+        : fcHour === 0
+          ? 'اکنون'
+          : faTehranHour(fc.times[fcHour])
+    : modeFrames.length === 0
       ? error
         ? 'عدم اتصال به رادار'
         : satelliteNoFrames
@@ -101,6 +140,13 @@ export default function TimelineControl() {
       : frame
         ? unixToFaTime(frame.time)
         : '...'
+
+  const hintStart = isForecastMode ? 'اکنون' : '۲ ساعت قبل'
+  const hintEnd = isForecastMode
+    ? `+${faNum(fcMax)} ساعت`
+    : isRadarMode
+      ? '۳۰ دقیقه بعد'
+      : 'تصاویر روزانه'
 
   return (
     <div
@@ -121,6 +167,19 @@ export default function TimelineControl() {
         >
           <Radar className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">رادار</span>
+        </button>
+        <button
+          onClick={() => selectMode('forecast')}
+          className={cn(
+            'flex items-center gap-1.5 px-2.5 py-1.5 transition-colors sm:px-3',
+            timelineMode === 'forecast'
+              ? 'bg-primary/25 text-primary font-bold'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+          title="پیش‌بینی رنگی ۴۸ ساعت آینده — حرکت سامانه‌ها روی نقشه"
+        >
+          <CloudRainWind className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">پیش‌بینی</span>
         </button>
         <button
           onClick={() => selectMode('satellite')}
@@ -152,31 +211,43 @@ export default function TimelineControl() {
           type="range"
           className="timeline-range w-full"
           min={0}
-          max={Math.max(modeFrames.length - 1, 0)}
-          value={Math.min(idx, Math.max(modeFrames.length - 1, 0))}
+          max={isForecastMode ? fcMax : Math.max(modeFrames.length - 1, 0)}
+          value={isForecastMode ? fcHour : Math.min(idx, Math.max(modeFrames.length - 1, 0))}
           onChange={(e) => {
             setPlaying(false)
-            if (isRadarMode) setFrameIndex(Number(e.target.value))
-            else setSatIndex(Number(e.target.value))
+            const v = Number(e.target.value)
+            if (isForecastMode) setForecastHour(v)
+            else if (isRadarMode) setFrameIndex(v)
+            else setSatIndex(v)
           }}
-          disabled={modeFrames.length === 0}
+          disabled={isForecastMode ? fcLen === 0 : modeFrames.length === 0}
         />
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-          <span>۲ ساعت قبل</span>
+          <span>{hintStart}</span>
           <span className="font-bold text-foreground" dir="ltr">
             {timeLabel}
+            {isForecastMode && fcReady && (
+              <span className="ms-1 rounded bg-emerald-500/20 px-1 text-[9px] text-emerald-300">
+                {FIELD_LABEL[forecastField] ?? ''} · مدل
+              </span>
+            )}
+            {isForecastMode && fc.loading && fcLen > 0 && (
+              <span className="ms-1 rounded bg-amber-500/20 px-1 text-[9px] text-amber-300">
+                به‌روزرسانی...
+              </span>
+            )}
             {satelliteNoFrames && (
               <span className="ms-1 rounded bg-cyan-500/20 px-1 text-[9px] text-cyan-300">
                 NASA GIBS
               </span>
             )}
-            {frame?.nowcast && minutesAhead > 0 && (
+            {!isForecastMode && frame?.nowcast && minutesAhead > 0 && (
               <span className="ms-1 rounded bg-amber-500/20 px-1 text-[9px] text-amber-300">
-                پیش‌بینی
+                کوتاه‌مدت
               </span>
             )}
           </span>
-          <span>۳۰ دقیقه بعد</span>
+          <span>{hintEnd}</span>
         </div>
       </div>
     </div>

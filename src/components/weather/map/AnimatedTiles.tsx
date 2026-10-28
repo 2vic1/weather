@@ -35,7 +35,13 @@ export default function AnimatedTiles() {
 
   const isRadarMode = timelineMode === 'radar'
   // tropical supersedes plain radar (same product, different palette/settings)
-  const visible = isRadarMode ? radarOn || tropicalOn : satelliteOn
+  // forecast mode renders its own model field on canvas — hide tile overlays
+  const visible =
+    timelineMode === 'forecast'
+      ? false
+      : isRadarMode
+        ? radarOn || tropicalOn
+        : satelliteOn
 
   const modeList = isRadarMode ? frames : satFrames
   const activeIndex = isRadarMode ? frameIndex : satIndex

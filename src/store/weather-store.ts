@@ -1,12 +1,17 @@
 'use client'
 
 import { create } from 'zustand'
-import type { CityPoint, CurrentWeather, RainViewerData } from '@/lib/weather-types'
+import type {
+  CityPoint,
+  CurrentWeather,
+  ForecastFieldId,
+  RainViewerData,
+} from '@/lib/weather-types'
 
 export type BaseLayerId = 'dark' | 'light' | 'satellite' | 'terrain'
-export type OverlayId = 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx'
-export type TimelineMode = 'radar' | 'satellite'
-export type SidebarTab = 'current' | 'hourly' | 'daily' | 'atmosphere' | 'ai'
+export type OverlayId = 'radar' | 'satellite' | 'wind' | 'temp' | 'tropical' | 'fx' | 'forecast'
+export type TimelineMode = 'radar' | 'satellite' | 'forecast'
+export type SidebarTab = 'current' | 'hourly' | 'daily' | 'rain' | 'atmosphere' | 'ai'
 
 export interface RainFrame {
   time: number
@@ -34,6 +39,12 @@ interface WeatherStore {
   /** RainViewer color palette (0..8) for radar / tropical layer */
   radarColor: number
   setRadarColor: (c: number) => void
+
+  // animated model forecast (Windy-style)
+  forecastField: ForecastFieldId
+  setForecastField: (f: ForecastFieldId) => void
+  forecastHour: number
+  setForecastHour: (h: number) => void
 
   // timeline (radar/satellite animation)
   timelineMode: TimelineMode
@@ -80,12 +91,25 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
 
   baseLayer: 'dark',
   setBaseLayer: (b) => set({ baseLayer: b }),
-  overlays: { radar: true, satellite: false, wind: true, temp: false, tropical: false, fx: true },
+  overlays: {
+    radar: true,
+    satellite: false,
+    wind: true,
+    temp: false,
+    tropical: false,
+    fx: true,
+    forecast: false,
+  },
   toggleOverlay: (id) =>
     set((s) => ({ overlays: { ...s.overlays, [id]: !s.overlays[id] } })),
 
   radarColor: 4,
   setRadarColor: (c) => set({ radarColor: Math.min(Math.max(Math.round(c), 0), 8) }),
+
+  forecastField: 'precip',
+  setForecastField: (f) => set({ forecastField: f }),
+  forecastHour: 0,
+  setForecastHour: (h) => set({ forecastHour: Math.max(0, Math.round(h)) }),
 
   timelineMode: 'radar',
   setTimelineMode: (m) => set({ timelineMode: m }),

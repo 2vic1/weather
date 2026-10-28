@@ -20,6 +20,7 @@ import { faNum } from '@/lib/format'
 import AnimatedTiles from './AnimatedTiles'
 import WindParticles from './WindParticles'
 import TempHeatmap from './TempHeatmap'
+import ForecastField from './ForecastField'
 import StormEffects from './StormEffects'
 
 const BASE_LAYERS: Record<
@@ -242,6 +243,7 @@ export default function MapPanel() {
       <AnimatedTiles />
       <WindParticles />
       <TempHeatmap />
+      <ForecastField />
       <StormEffects />
       <MapController />
     </MapContainer>
