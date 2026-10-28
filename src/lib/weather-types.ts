@@ -118,9 +118,9 @@ export interface RainViewerData {
   satellite: RvFrame[]
 }
 
-// ===== Forecast field (animated model layers: precip / temp / clouds) =====
+// ===== Forecast field (animated model layers: precip / temp / clouds / cape / snow) =====
 
-export type ForecastFieldId = 'precip' | 'temp' | 'clouds'
+export type ForecastFieldId = 'precip' | 'temp' | 'clouds' | 'cape' | 'snow'
 
 export interface ForecastFieldPoint {
   lat: number
@@ -131,6 +131,12 @@ export interface ForecastFieldPoint {
   temp: number[]
   /** % cloud cover per hour */
   clouds: number[]
+  /** hPa mean-sea-level pressure per hour (isobars) */
+  press: number[]
+  /** J/kg CAPE per hour (thunderstorm energy) */
+  cape: number[]
+  /** cm snowfall per hour */
+  snow: number[]
 }
 
 export interface ForecastFieldData {

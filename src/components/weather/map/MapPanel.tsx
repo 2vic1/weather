@@ -22,6 +22,7 @@ import WindParticles from './WindParticles'
 import FieldCanvas from './FieldCanvas'
 import StormEffects from './StormEffects'
 import DustTiles from './DustTiles'
+import NasaTiles from './NasaTiles'
 import AnalysisCircles from './AnalysisCircles'
 
 const BASE_LAYERS: Record<
@@ -260,6 +261,7 @@ export default function MapPanel() {
       <CityMarkers />
       <SelectedMarker />
       <DustTiles />
+      <NasaTiles />
       <AnimatedTiles />
       <WindParticles />
       <FieldCanvas />

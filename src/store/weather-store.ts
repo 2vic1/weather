@@ -20,6 +20,8 @@ export type OverlayId =
   | 'dust'
   | 'aq'
   | 'cape'
+  | 'fires'
+  | 'truecolor'
 export type TimelineMode = 'radar' | 'satellite' | 'forecast'
 export type SidebarTab = 'current' | 'hourly' | 'daily' | 'rain' | 'atmosphere' | 'ai'
 
@@ -59,6 +61,9 @@ interface WeatherStore {
   setForecastField: (f: ForecastFieldId) => void
   forecastHour: number
   setForecastHour: (h: number) => void
+  /** draw Windy-style isobar pressure contours over the active model field */
+  showIsobars: boolean
+  setShowIsobars: (v: boolean) => void
 
   // timeline (radar/satellite animation)
   timelineMode: TimelineMode
@@ -123,6 +128,8 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
     dust: false,
     aq: false,
     cape: false,
+    fires: false,
+    truecolor: false,
   },
   toggleOverlay: (id) =>
     set((s) => ({ overlays: { ...s.overlays, [id]: !s.overlays[id] } })),
@@ -132,6 +139,8 @@ export const useWeatherStore = create<WeatherStore>((set) => ({
 
   forecastField: 'precip',
   setForecastField: (f) => set({ forecastField: f }),
+  showIsobars: false,
+  setShowIsobars: (v) => set({ showIsobars: v }),
   forecastHour: 0,
   // fractional frames are allowed — the renderer morphs between 3-hourly steps
   setForecastHour: (h) => set({ forecastHour: Math.max(0, Math.min(h, 9999)) }),

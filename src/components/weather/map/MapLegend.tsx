@@ -8,7 +8,12 @@
 // Pure indicator: pointer-events-none, never blocks map interaction.
 
 import { useWeatherStore } from '@/store/weather-store'
-import { RADAR_PALETTES, PRECIP_LEGEND_CSS } from '@/lib/map-legends'
+import {
+  RADAR_PALETTES,
+  PRECIP_LEGEND_CSS,
+  CAPE_LEGEND_CSS,
+  SNOW_LEGEND_CSS,
+} from '@/lib/map-legends'
 import { tempColor } from '@/lib/weather-codes'
 import { useForecastState } from './forecastCache'
 
@@ -16,6 +21,8 @@ const FIELD_FA: Record<string, string> = {
   precip: 'بارش (mm/h)',
   temp: 'دما (°C)',
   clouds: 'پوشش ابر (٪)',
+  cape: 'ناپایداری CAPE (J/kg)',
+  snow: 'برف (cm/h)',
 }
 
 export default function MapLegend() {
@@ -100,6 +107,32 @@ export default function MapLegend() {
                 <span>۲۰</span>
                 <span>۳۰</span>
                 <span>+۴۲</span>
+              </div>
+            </>
+          )}
+          {forecastField === 'cape' && (
+            <>
+              <div className="h-2 w-full rounded-full" style={{ background: CAPE_LEGEND_CSS }} />
+              <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                <span>۳۰</span>
+                <span>۱۵۰</span>
+                <span>۴۰۰</span>
+                <span>۹۰۰</span>
+                <span>۱۸۰۰</span>
+                <span>۳۰۰۰+</span>
+              </div>
+            </>
+          )}
+          {forecastField === 'snow' && (
+            <>
+              <div className="h-2 w-full rounded-full" style={{ background: SNOW_LEGEND_CSS }} />
+              <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                <span>۰٫۰۲</span>
+                <span>۰٫۰۸</span>
+                <span>۰٫۲</span>
+                <span>۰٫۵</span>
+                <span>۱</span>
+                <span>۲+</span>
               </div>
             </>
           )}

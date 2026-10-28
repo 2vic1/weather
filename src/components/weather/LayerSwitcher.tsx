@@ -19,6 +19,9 @@ import {
   Haze,
   AirVent,
   CloudLightning,
+  Flame,
+  Snowflake,
+  Waves,
 } from 'lucide-react'
 // this lucide version has no Hurricane icon — Tornado is the closest match
 const Hurricane = Tornado
@@ -31,6 +34,8 @@ import {
   RADAR_PALETTES as PALETTES,
   PRECIP_LEGEND_CSS,
   NASA_DUST_LEGEND_CSS as DUST_LEGEND_CSS,
+  CAPE_LEGEND_CSS,
+  SNOW_LEGEND_CSS,
 } from '@/lib/map-legends'
 
 const BASES: Array<{ id: BaseLayerId; label: string; icon: typeof Moon }> = [
@@ -52,6 +57,8 @@ const OVERLAYS: Array<{
     | 'dust'
     | 'aq'
     | 'cape'
+    | 'fires'
+    | 'truecolor'
   label: string
   source: string
   icon: typeof CloudRain
@@ -60,7 +67,9 @@ const OVERLAYS: Array<{
   { id: 'forecast', label: 'پیش‌بینی رنگی ۱۵ روز', source: 'Open-Meteo', icon: CloudRainWind },
   { id: 'tropical', label: 'حاره‌ای | طوفان‌ها', source: 'RainViewer', icon: Hurricane },
   { id: 'satellite', label: 'ماهواره ابر زنده (IR)', source: 'RainViewer', icon: SatelliteIcon },
+  { id: 'truecolor', label: 'ماهواره رنگ طبیعی (روزانه)', source: 'NASA GIBS', icon: SatelliteIcon },
   { id: 'dust', label: 'گرد و غبار', source: 'NASA GIBS', icon: Haze },
+  { id: 'fires', label: 'نقاط داغ و آتش‌سوزی', source: 'NASA GIBS', icon: Flame },
   { id: 'aq', label: 'کیفیت هوا (ذرات)', source: 'Open-Meteo', icon: AirVent },
   { id: 'cape', label: 'ناپایداری و رعدوبرق', source: 'Open-Meteo', icon: CloudLightning },
   { id: 'wind', label: 'حرکت توده‌های هوا', source: 'Open-Meteo', icon: Wind },
@@ -72,6 +81,8 @@ const FORECAST_FIELDS = [
   { id: 'precip', label: 'بارش', icon: CloudRain },
   { id: 'temp', label: 'دما', icon: Thermometer },
   { id: 'clouds', label: 'ابر', icon: Cloud },
+  { id: 'cape', label: 'ناپایداری', icon: CloudLightning },
+  { id: 'snow', label: 'برف', icon: Snowflake },
 ] as const
 
 /** representative sample values per band → drives the legend rows automatically */
@@ -89,6 +100,8 @@ export default function LayerSwitcher() {
   const setRadarColor = useWeatherStore((s) => s.setRadarColor)
   const forecastField = useWeatherStore((s) => s.forecastField)
   const setForecastField = useWeatherStore((s) => s.setForecastField)
+  const showIsobars = useWeatherStore((s) => s.showIsobars)
+  const setShowIsobars = useWeatherStore((s) => s.setShowIsobars)
   const setPlaying = useWeatherStore((s) => s.setPlaying)
   const flyTo = useWeatherStore((s) => s.flyTo)
   // start collapsed on phones so the panel doesn't bury the map and controls
@@ -222,6 +235,28 @@ export default function LayerSwitcher() {
                 ))}
               </div>
 
+              {/* Windy-style isobar overlay toggle */}
+              <button
+                onClick={() => setShowIsobars(!showIsobars)}
+                className={cn(
+                  'mt-2 flex w-full items-center justify-between rounded-lg border px-2 py-1.5 text-[10px] transition-all',
+                  showIsobars
+                    ? 'border-emerald-400/70 bg-emerald-400/15 font-bold text-emerald-200'
+                    : 'border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/60'
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Waves className="h-3.5 w-3.5" />
+                  خطوط تراز فشار (isobar)
+                </span>
+                <span
+                  className={cn(
+                    'h-2 w-2 rounded-full',
+                    showIsobars ? 'bg-emerald-300 shadow-[0_0_6px] shadow-emerald-400/70' : 'bg-muted-foreground/40'
+                  )}
+                />
+              </button>
+
               {forecastField === 'precip' && (
                 <div className="mt-2">
                   <div className="mb-1 text-[9px] text-muted-foreground">شدت بارش (mm/h)</div>
@@ -263,6 +298,38 @@ export default function LayerSwitcher() {
                     <span>۰</span>
                     <span>۵۰</span>
                     <span>۱۰۰</span>
+                  </div>
+                </div>
+              )}
+
+              {forecastField === 'cape' && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[9px] text-muted-foreground">انرژی ناپایداری — CAPE (J/kg)</div>
+                  <div className="h-2 w-full rounded-full" style={{ background: CAPE_LEGEND_CSS }} />
+                  <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                    <span>۳۰</span>
+                    <span>۱۵۰</span>
+                    <span>۴۰۰</span>
+                    <span>۹۰۰</span>
+                    <span>۱۸۰۰</span>
+                    <span>۳۰۰۰+</span>
+                  </div>
+                  <p className="mt-1 text-[9px] leading-4 text-muted-foreground">
+                    CAPE بالای ۱۰۰۰ = پتانسیل رگبار و رعدوبرق؛ بالای ۲۵۰۰ = رگبار شدید و تگرگ
+                  </p>
+                </div>
+              )}
+              {forecastField === 'snow' && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[9px] text-muted-foreground">شدت بارش برف (cm/h)</div>
+                  <div className="h-2 w-full rounded-full" style={{ background: SNOW_LEGEND_CSS }} />
+                  <div className="mt-0.5 flex justify-between text-[8px] text-muted-foreground" dir="ltr">
+                    <span>۰٫۰۲</span>
+                    <span>۰٫۰۸</span>
+                    <span>۰٫۲</span>
+                    <span>۰٫۵</span>
+                    <span>۱</span>
+                    <span>۲+</span>
                   </div>
                 </div>
               )}

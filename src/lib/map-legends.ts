@@ -25,3 +25,11 @@ export const PRECIP_LEGEND_CSS =
 
 export const NASA_DUST_LEGEND_CSS =
   'linear-gradient(90deg,#2c7bb6,#abd9e9,#ffffbf,#fdae61,#d7191c,#7f0000)'
+
+/** CAPE (J/kg) — mirrors buildCapeLut in FieldCanvas.tsx (sqrt scale 0…5000) */
+export const CAPE_LEGEND_CSS =
+  'linear-gradient(90deg, rgba(120,200,130,.34) 8%, rgba(80,195,110,.44) 18%, rgba(230,225,95,.52) 28%, rgba(248,165,55,.6) 42%, rgba(240,85,45,.66) 60%, rgba(190,40,85,.72) 77%, rgba(135,45,150,.78) 100%)'
+
+/** snowfall (cm/h) — mirrors buildSnowLut in FieldCanvas.tsx (sqrt scale 0…2) */
+export const SNOW_LEGEND_CSS =
+  'linear-gradient(90deg, rgba(238,245,252,.38) 10%, rgba(214,230,248,.5) 20%, rgba(185,208,242,.6) 32%, rgba(152,182,226,.68) 50%, rgba(122,156,212,.74) 71%, rgba(92,130,196,.8) 100%)'

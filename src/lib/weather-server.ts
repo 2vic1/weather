@@ -479,7 +479,16 @@ export async function fetchTempField(
 
 export interface ForecastFieldResult {
   times: string[]
-  points: Array<{ lat: number; lon: number; precip: number[]; temp: number[]; clouds: number[] }>
+  points: Array<{
+    lat: number
+    lon: number
+    precip: number[]
+    temp: number[]
+    clouds: number[]
+    press: number[]
+    cape: number[]
+    snow: number[]
+  }>
   n: number
   bounds: { latMin: number; latMax: number; lonMin: number; lonMax: number }
   synthetic: boolean
@@ -525,7 +534,8 @@ export async function fetchForecastField(
   // weight ≤ 576 calls per fetch, always below the 600/min burst ceiling
   const nn = Math.min(Math.max(Math.round(regionSpanLat > 40 ? 24 : 20), 10), 24)
 
-  const key = `ff:${bLatMin}:${bLatMax}:${bLonMin}:${bLonMax}:${nn}:${ST}`
+  // key bump v2 → includes press/cape/snow series (stale v1 caches are dropped)
+  const key = `ff2:${bLatMin}:${bLatMax}:${bLonMin}:${bLonMax}:${nn}:${ST}`
   const now0 = Date.now()
   const hit = ffCache.get(key)
   if (hit && now0 - hit.ts < FF_TTL) return hit.data
@@ -554,7 +564,8 @@ export async function fetchForecastField(
     const params = new URLSearchParams({
       latitude: idx.map((i) => lats[i]).join(','),
       longitude: idx.map((i) => lons[i]).join(','),
-      hourly: 'precipitation,temperature_2m,cloud_cover',
+      // pressure_msl → isobars · cape → thunderstorm energy · snowfall → snow
+      hourly: 'precipitation,temperature_2m,cloud_cover,pressure_msl,cape,snowfall',
       forecast_days: '16',
       timezone: 'UTC',
     })
@@ -566,7 +577,15 @@ export async function fetchForecastField(
       45 * 60_000
     )
     const arr = (Array.isArray(raw) ? raw : [raw]) as Array<{
-      hourly?: { time?: string[]; precipitation?: (number | null)[]; temperature_2m?: (number | null)[]; cloud_cover?: (number | null)[] }
+      hourly?: {
+        time?: string[]
+        precipitation?: (number | null)[]
+        temperature_2m?: (number | null)[]
+        cloud_cover?: (number | null)[]
+        pressure_msl?: (number | null)[]
+        cape?: (number | null)[]
+        snowfall?: (number | null)[]
+      }
     }>
     for (let k = 0; k < idx.length; k++) {
       const h = arr[k]?.hourly
@@ -584,12 +603,27 @@ export async function fetchForecastField(
       const sub = (a: (number | null)[] | undefined, round: (v: number) => number) =>
         sel.map((i) => round(val(a, i)))
 
+      const pArr = sub(h.precipitation, (v) => Math.round(v * 100) / 100)
+      const tArr = sub(h.temperature_2m, (v) => Math.round(v * 10) / 10)
+      const sArr = sub(h.snowfall, (v) => Math.round(v * 100) / 100)
+      // physical guard: snow requires precipitation AND sub-freezing air;
+      // some upstream runs emit absurd cm/h spikes with no precipitation
+      for (let i = 0; i < sArr.length; i++) {
+        const tt = tArr[i]
+        const pp = pArr[i]
+        if (!Number.isFinite(tt) || tt > 2.5 || !Number.isFinite(pp) || pp <= 0.02) sArr[i] = 0
+        else if (sArr[i] > 3) sArr[i] = 3
+      }
+
       points[idx[k]] = {
         lat: lats[idx[k]],
         lon: lons[idx[k]],
-        precip: sub(h.precipitation, (v) => Math.round(v * 100) / 100),
-        temp: sub(h.temperature_2m, (v) => Math.round(v * 10) / 10),
+        precip: pArr,
+        temp: tArr,
         clouds: sub(h.cloud_cover, (v) => Math.round(v)),
+        press: sub(h.pressure_msl, (v) => Math.round(v)),
+        cape: sub(h.cape, (v) => Math.round(v)),
+        snow: sArr,
       }
       if (!times.length) times = sel.map((i) => t[i])
     }
@@ -634,7 +668,16 @@ export async function fetchForecastField(
   const nan = times.map(() => NaN)
   for (let i = 0; i < N; i++) {
     if (!points[i]) {
-      points[i] = { lat: lats[i], lon: lons[i], precip: [...nan], temp: [...nan], clouds: [...nan] }
+      points[i] = {
+        lat: lats[i],
+        lon: lons[i],
+        precip: [...nan],
+        temp: [...nan],
+        clouds: [...nan],
+        press: [...nan],
+        cape: [...nan],
+        snow: [...nan],
+      }
     }
   }
 
@@ -681,6 +724,9 @@ function buildSyntheticField(
     const precip: number[] = []
     const temp: number[] = []
     const clouds: number[] = []
+    const press: number[] = []
+    const cape: number[] = []
+    const snow: number[] = []
     for (let s = 0; s < steps; s++) {
       const hUTC = (s * ST) / 24 // days since start
       const hrs = s * ST
@@ -717,8 +763,19 @@ function buildSyntheticField(
       precip.push(p)
       clouds.push(cl)
       temp.push(Math.round(t * 10) / 10)
+      // MSL pressure: wandering highs/lows tied to the two synthetic systems
+      const pr =
+        1014 -
+        10 * Math.min(1, (gA * pA) / 7) -
+        8 * Math.min(1, (gB * pB) / 9) +
+        5 * Math.sin(lon / 11 + lat / 8 + hUTC * 1.7)
+      press.push(Math.round(pr))
+      // CAPE: convection-driven thunderstorm energy
+      cape.push(Math.round(1500 * Math.min(1, conv / 1.1) + 350 * Math.min(1, (gA * pA) / 8)))
+      // snowfall: precip falling in sub-freezing air
+      snow.push(t <= 1.5 ? Math.round(p * 0.85 * 100) / 100 : 0)
     }
-    return { lat, lon, precip, temp, clouds }
+    return { lat, lon, precip, temp, clouds, press, cape, snow }
   })
 
   return { times, points, n: nn, bounds: region, synthetic: true }

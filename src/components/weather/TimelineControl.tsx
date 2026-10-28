@@ -18,6 +18,8 @@ const FIELD_LABEL: Record<string, string> = {
   precip: 'بارش',
   temp: 'دما',
   clouds: 'ابر',
+  cape: 'ناپایداری',
+  snow: 'برف',
 }
 
 const WD_FA: Record<string, string> = {

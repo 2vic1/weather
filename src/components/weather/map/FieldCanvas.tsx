@@ -94,9 +94,71 @@ function buildCloudsLut(): Uint8Array {
   return lut
 }
 
+/** CAPE (J/kg) thunderstorm-energy ramp — green → yellow → orange → red → purple */
+function buildCapeLut(): Uint8Array {
+  const stops: Array<[number, number, number, number, number]> = [
+    // J/kg, r, g, b, a
+    [30, 120, 200, 130, 0.34],
+    [150, 80, 195, 110, 0.44],
+    [400, 230, 225, 95, 0.52],
+    [900, 248, 165, 55, 0.6],
+    [1800, 240, 85, 45, 0.66],
+    [3000, 190, 40, 85, 0.72],
+    [5000, 135, 45, 150, 0.78],
+  ]
+  const lut = new Uint8Array(256 * 4)
+  const idxOf = (j: number) => Math.round(Math.sqrt(Math.min(j, 5000) / 5000) * 255)
+  for (let s = 0; s < stops.length - 1; s++) {
+    const [m0, r0, g0, b0, a0] = stops[s]
+    const [m1, r1, g1, b1, a1] = stops[s + 1]
+    const i0 = idxOf(m0)
+    const i1 = idxOf(m1)
+    for (let i = i0; i <= i1; i++) {
+      const t = (i - i0) / Math.max(i1 - i0, 1)
+      lut[i * 4] = r0 + (r1 - r0) * t
+      lut[i * 4 + 1] = g0 + (g1 - g0) * t
+      lut[i * 4 + 2] = b0 + (b1 - b0) * t
+      lut[i * 4 + 3] = Math.round((a0 + (a1 - a0) * t) * 255)
+    }
+  }
+  for (let i = 0; i < idxOf(stops[0][0]); i++) lut[i * 4 + 3] = 0
+  return lut
+}
+
+/** snowfall (cm/h) — icy white → deep blue */
+function buildSnowLut(): Uint8Array {
+  const stops: Array<[number, number, number, number, number]> = [
+    [0.02, 238, 245, 252, 0.38],
+    [0.08, 214, 230, 248, 0.5],
+    [0.2, 185, 208, 242, 0.6],
+    [0.5, 152, 182, 226, 0.68],
+    [1, 122, 156, 212, 0.74],
+    [2, 92, 130, 196, 0.8],
+  ]
+  const lut = new Uint8Array(256 * 4)
+  const idxOf = (cm: number) => Math.round(Math.sqrt(Math.min(cm, 2) / 2) * 255)
+  for (let s = 0; s < stops.length - 1; s++) {
+    const [m0, r0, g0, b0, a0] = stops[s]
+    const [m1, r1, g1, b1, a1] = stops[s + 1]
+    const i0 = idxOf(m0)
+    const i1 = idxOf(m1)
+    for (let i = i0; i <= i1; i++) {
+      const t = (i - i0) / Math.max(i1 - i0, 1)
+      lut[i * 4] = r0 + (r1 - r0) * t
+      lut[i * 4 + 1] = g0 + (g1 - g0) * t
+      lut[i * 4 + 2] = b0 + (b1 - b0) * t
+      lut[i * 4 + 3] = Math.round((a0 + (a1 - a0) * t) * 255)
+    }
+  }
+  for (let i = 0; i < idxOf(stops[0][0]); i++) lut[i * 4 + 3] = 0
+  return lut
+}
+
 let LUT_TEMP: Uint8Array | null = null
 let LUT_PRECIP: Uint8Array | null = null
 let LUT_CLOUDS: Uint8Array | null = null
+let LUT_CAPE: Uint8Array | null = null
+let LUT_SNOW: Uint8Array | null = null
 
 function mercY(lat: number): number {
   const l = Math.max(-85, Math.min(85, lat))
@@ -113,6 +175,7 @@ export default function FieldCanvas() {
   const radarFuture = useWeatherStore((s) => s.radarFuture)
   const field = useWeatherStore((s) => s.forecastField)
   const hour = useWeatherStore((s) => s.forecastHour)
+  const showIsobars = useWeatherStore((s) => s.showIsobars)
   const [, setGridTick] = useState(0)
 
   // radar mode scrubbing past «اکنون» → the 15-day model field replaces the radar tiles
@@ -241,7 +304,16 @@ export default function FieldCanvas() {
       const r = n - 1 - i
       for (let j = 0; j < n; j++) {
         const p = pts[i * n + j]
-        const arr = fld === 'precip' ? p?.precip : fld === 'temp' ? p?.temp : p?.clouds
+        const arr =
+          fld === 'precip'
+            ? p?.precip
+            : fld === 'temp'
+              ? p?.temp
+              : fld === 'cape'
+                ? p?.cape
+                : fld === 'snow'
+                  ? p?.snow
+                  : p?.clouds
         const a0 = arr?.[hi] ?? NaN
         const a1 = arr?.[hi1] ?? NaN
         // NaN-aware lerp — partial series never poison a valid frame
@@ -273,7 +345,18 @@ export default function FieldCanvas() {
     if (!LUT_TEMP) LUT_TEMP = buildTempLut()
     if (!LUT_PRECIP) LUT_PRECIP = buildPrecipLut()
     if (!LUT_CLOUDS) LUT_CLOUDS = buildCloudsLut()
-    const lut = fld === 'precip' ? LUT_PRECIP : fld === 'clouds' ? LUT_CLOUDS : LUT_TEMP
+    if (!LUT_CAPE) LUT_CAPE = buildCapeLut()
+    if (!LUT_SNOW) LUT_SNOW = buildSnowLut()
+    const lut =
+      fld === 'precip'
+        ? LUT_PRECIP
+        : fld === 'clouds'
+          ? LUT_CLOUDS
+          : fld === 'cape'
+            ? LUT_CAPE
+            : fld === 'snow'
+              ? LUT_SNOW
+              : LUT_TEMP
 
     // view corners (Web-Mercator rows are linear in screen pixels)
     const size = map.getSize()
@@ -364,6 +447,18 @@ export default function FieldCanvas() {
             continue
           }
           li = precipLutIndex(v)
+        } else if (fld === 'cape') {
+          if (v < 30) {
+            data[o + 3] = 0
+            continue
+          }
+          li = Math.min(255, (Math.sqrt(Math.min(v, 5000) / 5000) * 255) | 0)
+        } else if (fld === 'snow') {
+          if (v < 0.02) {
+            data[o + 3] = 0
+            continue
+          }
+          li = Math.min(255, (Math.sqrt(Math.min(v, 2) / 2) * 255) | 0)
         } else if (fld === 'clouds') {
           if (v < 3) {
             data[o + 3] = 0
@@ -405,13 +500,23 @@ export default function FieldCanvas() {
       for (let j = 0; j < n && labels < 80; j += step) {
         const p = pts[i * n + j]
         if (!p) continue
-        const arr = fld === 'precip' ? p.precip : p.temp
+        const arr =
+          fld === 'precip' ? p.precip : fld === 'cape' ? p.cape : fld === 'snow' ? p.snow : p.temp
         const v = arr?.[li0] ?? NaN
         if (!Number.isFinite(v)) continue
         if (fld === 'precip' && v < 0.3) continue
+        if (fld === 'cape' && v < 250) continue
+        if (fld === 'snow' && v < 0.05) continue
         const pt = map.latLngToContainerPoint([p.lat, p.lon])
         if (pt.x < 14 || pt.x > w - 14 || pt.y < 14 || pt.y > h - 14) continue
-        const label = fld === 'precip' ? faNum(v, 1) : `${faNum(Math.round(v))}°`
+        const label =
+          fld === 'precip'
+            ? faNum(v, 1)
+            : fld === 'cape'
+              ? faNum(Math.round(v))
+              : fld === 'snow'
+                ? faNum(v, 1)
+                : `${faNum(Math.round(v))}°`
         ctx.fillStyle = fld === 'precip' && v >= 4 ? 'rgba(255,255,255,0.98)' : 'rgba(255,255,255,0.94)'
         ctx.fillText(label, pt.x, pt.y)
         if (fld === 'precip' && v >= 0.3) {
@@ -420,10 +525,133 @@ export default function FieldCanvas() {
           ctx.fillText('mm', pt.x, pt.y + 9)
           ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
         }
+        if (fld === 'cape' && v >= 250) {
+          ctx.fillStyle = 'rgba(255,255,255,0.6)'
+          ctx.font = '500 8px Vazirmatn, Tahoma, sans-serif'
+          ctx.fillText('J/kg', pt.x, pt.y + 9)
+          ctx.font = '600 11px Vazirmatn, Tahoma, sans-serif'
+        }
         labels++
       }
     }
     ctx.shadowBlur = 0
+
+    // ---- isobars (MSL pressure contours, Windy-style) ----
+    if (showIsobars && pts[0]?.press) {
+      // interpolated pressure grid, row 0 = north (same flip as vals)
+      const pr = new Float32Array(n * n)
+      let finite = 0
+      for (let i = 0; i < n; i++) {
+        const r = n - 1 - i
+        for (let j = 0; j < n; j++) {
+          const p = pts[i * n + j]
+          const a0 = p?.press?.[hi] ?? NaN
+          const a1 = p?.press?.[hi1] ?? NaN
+          let v: number
+          if (!Number.isFinite(a0)) v = a1
+          else if (!Number.isFinite(a1)) v = a0
+          else v = a0 + (a1 - a0) * tf
+          pr[r * n + j] = Number.isFinite(v) ? v : NaN
+          if (Number.isFinite(v)) finite++
+        }
+      }
+      if (finite > (n * n) / 3) {
+        // screen position of every grid node (row-major, row 0 = north)
+        const sx = new Float64Array(n * n)
+        const sy = new Float64Array(n * n)
+        for (let r = 0; r < n; r++) {
+          for (let c = 0; c < n; c++) {
+            const p = pts[(n - 1 - r) * n + c]
+            const pt = map.latLngToContainerPoint([p?.lat ?? bounds.latMax, p?.lon ?? bounds.lonMin])
+            sx[r * n + c] = pt.x
+            sy[r * n + c] = pt.y
+          }
+        }
+        // contour interval: 5 hPa zoomed out, 2 hPa zoomed in
+        const gap = zoom < 4 ? 5 : 2
+        let minP = Infinity
+        let maxP = -Infinity
+        for (let k = 0; k < n * n; k++) {
+          if (Number.isFinite(pr[k])) {
+            if (pr[k] < minP) minP = pr[k]
+            if (pr[k] > maxP) maxP = pr[k]
+          }
+        }
+        const startL = Math.ceil(minP / gap) * gap
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'
+        ctx.lineWidth = 1
+        ctx.font = '600 10px Vazirmatn, Tahoma, sans-serif'
+        ctx.shadowColor = 'rgba(0,0,0,0.85)'
+        ctx.shadowBlur = 3
+        let drawn = 0
+        const placed: Array<{ x: number; y: number }> = []
+        for (let level = startL; level <= maxP && drawn < 60; level += gap) {
+          const segs: Array<[number, number, number, number]> = []
+          for (let r = 0; r < n - 1; r++) {
+            for (let c = 0; c < n - 1; c++) {
+              const a = pr[r * n + c] // TL
+              const b = pr[r * n + c + 1] // TR
+              const cc = pr[(r + 1) * n + c + 1] // BR
+              const dd = pr[(r + 1) * n + c] // BL
+              if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(cc) || !Number.isFinite(dd)) continue
+              let code = 0
+              if (a > level) code |= 8
+              if (b > level) code |= 4
+              if (cc > level) code |= 2
+              if (dd > level) code |= 1
+              if (code === 0 || code === 15) continue
+              // edge crossings (screen px): T (top) · R (right) · B (bottom) · L (left)
+              const iT = (level - a) / (b - a)
+              const iR = (level - b) / (cc - b)
+              const iB = (level - dd) / (cc - dd)
+              const iL = (level - a) / (dd - a)
+              const xT = sx[r * n + c] + (sx[r * n + c + 1] - sx[r * n + c]) * iT
+              const yT = sy[r * n + c]
+              const xR = sx[r * n + c + 1]
+              const yR = sy[r * n + c + 1] + (sy[(r + 1) * n + c + 1] - sy[r * n + c + 1]) * iR
+              const xB = sx[(r + 1) * n + c] + (sx[(r + 1) * n + c + 1] - sx[(r + 1) * n + c]) * iB
+              const yB = sy[(r + 1) * n + c]
+              const xL = sx[r * n + c]
+              const yL = sy[r * n + c] + (sy[(r + 1) * n + c] - sy[r * n + c]) * iL
+              const push = (x1: number, y1: number, x2: number, y2: number) =>
+                segs.push([x1, y1, x2, y2])
+              switch (code) {
+                case 1: case 14: push(xL, yL, xB, yB); break
+                case 2: case 13: push(xR, yR, xB, yB); break
+                case 3: case 12: push(xL, yL, xR, yR); break
+                case 4: case 11: push(xT, yT, xR, yR); break
+                case 6: case 9: push(xT, yT, xB, yB); break
+                case 7: case 8: push(xL, yL, xT, yT); break
+                case 5: push(xT, yT, xL, yL); push(xR, yR, xB, yB); break
+                case 10: push(xT, yT, xR, yR); push(xL, yL, xB, yB); break
+              }
+            }
+          }
+          if (segs.length === 0) continue
+          ctx.beginPath()
+          for (const [x1, y1, x2, y2] of segs) {
+            if (Math.max(x1, x2) < 0 || Math.min(x1, x2) > w || Math.max(y1, y2) < 0 || Math.min(y1, y2) > h) continue
+            ctx.moveTo(x1, y1)
+            ctx.lineTo(x2, y2)
+          }
+          ctx.stroke()
+          // labels on a sparse subset of segments
+          const stride = Math.max(2, Math.round(segs.length / 6))
+          for (let s = 0; s < segs.length && drawn < 60; s += stride) {
+            const [x1, y1, x2, y2] = segs[s]
+            const lx = (x1 + x2) / 2
+            const ly = (y1 + y2) / 2
+            if (lx < 24 || lx > w - 24 || ly < 18 || ly > h - 18) continue
+            if (placed.some((q) => Math.abs(q.x - lx) < 70 && Math.abs(q.y - ly) < 26)) continue
+            placed.push({ x: lx, y: ly })
+            ctx.fillStyle = 'rgba(255,255,255,0.92)'
+            ctx.fillText(faNum(level), lx, ly)
+            drawn++
+          }
+        }
+        ctx.shadowBlur = 0
+      }
+    }
   }
 
   // after every render: publish the latest draw + trigger a repaint

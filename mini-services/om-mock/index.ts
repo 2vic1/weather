@@ -73,6 +73,7 @@ const BASE_VARS = [
   'lifted_index',
   'surface_pressure',
   'pressure_msl',
+  'snowfall',
   'is_day',
 ] as const
 
@@ -110,11 +111,13 @@ function buildSeries(
   const wantLi = need.has('lifted_index')
   const wantSp = need.has('surface_pressure')
   const wantPmsl = need.has('pressure_msl')
+  const wantSnow = need.has('snowfall')
   const wantIsDay = need.has('is_day')
   const cape = wantCape ? push('cape') : null
   const li = wantLi ? push('lifted_index') : null
   const sp = wantSp ? push('surface_pressure') : null
   const pmsl = wantPmsl ? push('pressure_msl') : null
+  const snow = wantSnow ? push('snowfall') : null
   const isDay = wantIsDay ? push('is_day') : null
 
   const needLevels = LEVELS.some((L) => need.has(`temperature_${L}hPa`))
@@ -193,8 +196,14 @@ function buildSeries(
     } else if (li) {
       li.push(0)
     }
-    if (sp) sp.push(Math.round(878 + 6 * Math.sin(i / 19)))
-    if (pmsl) pmsl.push(Math.round(1016 + 9 * Math.sin(i / 15 + 2)))
+    // MSL pressure tied to the synoptic systems — a real travelling low
+    // (isobars close around the storm centre) plus a gentle wandering gradient
+    const pmslV =
+      1016 - 13 * gA - 8 * gB + 5 * Math.sin(lat / 9 + lon / 12 + i / 29)
+    if (pmsl) pmsl.push(Math.round(pmslV))
+    if (sp) sp.push(Math.round(pmslV - 138 + 3 * Math.sin(i / 19)))
+    // snowfall: precipitation in sub-freezing air (cm/h, physically capped)
+    if (snow) snow.push(t <= 1.5 ? Math.round(mm * 0.85 * 100) / 100 : 0)
     if (isDay) isDay.push(hourLocal >= 7 && hourLocal <= 17 ? 1 : 0)
 
     if (needLevels) {
