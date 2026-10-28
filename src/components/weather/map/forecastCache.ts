@@ -64,9 +64,12 @@ function shouldRefetch(b: ForecastBounds): boolean {
   const g = state.bounds
   if (!g) return true
   const age = Date.now() - state.fetchedAt
+  // simulated fields are re-checked every 4 min so real data replaces them
+  // within minutes of the upstream quota resetting (real data: 45 min)
+  const freshMs = state.synthetic ? 4 * 60_000 : 45 * 60_000
   // the server returns a super-region (view + margin) — reuse it while the
   // requested view stays comfortably inside and data is fresh
-  if (!state.error && age < 45 * 60_000) {
+  if (!state.error && age < freshMs) {
     const mLat = (g.latMax - g.latMin) * 0.12
     const mLon = (g.lonMax - g.lonMin) * 0.12
     if (

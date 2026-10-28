@@ -703,7 +703,10 @@ export async function fetchForecastField(
     data = buildSyntheticField(lats, lons, ST, nn, region)
   }
 
-  ffCache.set(key, { data, ts: Date.now() })
+  // synthetic entries expire after ~5 min instead of the full FF_TTL —
+  // back-dating the timestamp makes the plain FF_TTL read check evict them
+  // early, so real data takes over within minutes of the quota resetting
+  ffCache.set(key, { data, ts: Date.now() - (data.synthetic ? FF_TTL - 5 * 60_000 : 0) })
   if (ffCache.size > FF_CACHE_CAP) {
     const now = Date.now()
     for (const [k, v] of ffCache) if (now - v.ts > FF_TTL) ffCache.delete(k)
@@ -742,21 +745,29 @@ function buildSyntheticField(
     for (let s = 0; s < steps; s++) {
       const hUTC = (s * ST) / 24 // days since start
       const hrs = s * ST
-      // System A — Mediterranean low sweeping east onto Iran
+      // System A — Mediterranean low sweeping east onto Iran (compact core)
       const aLat = 33.5 + 0.55 * hUTC
       const aLon = 26 + 2.35 * hUTC
-      const gA = Math.exp(-(((lat - aLat) / 3.4) ** 2 + ((lon - aLon) / 5.2) ** 2))
+      const gA = Math.exp(-(((lat - aLat) / 2.3) ** 2 + ((lon - aLon) / 3.4) ** 2))
       const pA = 9 * Math.max(0, Math.sin((Math.PI * hUTC) / 13)) * (0.55 + 0.45 * Math.sin((2 * Math.PI * hrs) / 30 + 1.1))
-      // System B — Arabian Sea system pushing north-east
+      // System B — Arabian Sea system pushing north-east (compact core)
       const bLat = 12 + 0.75 * hUTC
       const bLon = 57 + 0.5 * hUTC
-      const gB = Math.exp(-(((lat - bLat) / 3.2) ** 2 + ((lon - bLon) / 3.9) ** 2))
+      const gB = Math.exp(-(((lat - bLat) / 2.2) ** 2 + ((lon - bLon) / 2.8) ** 2))
       const pB = 13 * Math.max(0, Math.sin((Math.PI * hUTC) / 9 + 0.5)) * (0.6 + 0.4 * Math.sin((2 * Math.PI * hrs) / 26))
-      // Diurnal convection over the 22–38 N interior (peaks ~13 UTC ≈ 16:30 Tehran)
-      const convAmp = 1.1 * Math.exp(-(((lat - 30) / 9) ** 2))
+      // Diurnal convection — sparse isolated afternoon cells, NOT a blanket.
+      // A fixed pseudo-random hotspot gate (~6 % of the domain) decides WHERE
+      // showers can ever form; a slow wobble then pulses their intensity, so at
+      // any step only a handful of compact cells are wet while the plateau
+      // stays clean. (The old always-on term painted 70 % of Iran light blue.)
+      const convAmp = 1.1 * Math.exp(-(((lat - 30) / 8) ** 2))
       const hLocal = (13 + (hrs % 24) + 24) % 24
-      const wobble = 0.6 + 0.4 * Math.sin(lon * 12.9898 + lat * 78.233 + s * 6.13)
-      const conv = convAmp * Math.max(0, Math.sin((Math.PI * hLocal) / 12 - Math.PI / 6)) ** 2 * wobble
+      const hot = Math.sin(lon * 12.9898 + lat * 78.233 + 41.7)
+      const wobble = 0.55 + 0.45 * Math.sin(lon * 12.9898 + lat * 78.233 + s * 6.13)
+      const conv =
+        hot > 0.995
+          ? convAmp * Math.max(0, Math.sin((Math.PI * hLocal) / 12 - Math.PI / 6)) ** 2 * 2.2 * wobble
+          : 0
 
       let p = gA * pA + gB * pB + conv
       p = Math.max(0, Math.round(Math.min(p, 80) * 100) / 100)

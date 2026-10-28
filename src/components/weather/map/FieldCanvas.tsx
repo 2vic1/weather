@@ -251,8 +251,13 @@ export default function FieldCanvas() {
       timer = setTimeout(fetchBounds, 500)
     }
     map.on('moveend', onMove)
+    // idle re-check: lets a simulated (quota-dead) field quietly upgrade to
+    // real model data once the upstream recovers — no map interaction needed;
+    // shouldRefetch() in the cache gates this so fresh data isn't re-fetched
+    const recheck = setInterval(fetchBounds, 4 * 60_000)
     return () => {
       map.off('moveend', onMove)
+      clearInterval(recheck)
       if (timer) clearTimeout(timer)
     }
   }, [shouldLoad, map])

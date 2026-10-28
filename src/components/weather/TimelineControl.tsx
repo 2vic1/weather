@@ -434,6 +434,15 @@ export default function TimelineControl() {
                 <span className="ms-1 rounded bg-cyan-500/20 px-1 text-[9px] text-cyan-300" dir="rtl">
                   {relLabel}
                 </span>
+                {fc.synthetic && (
+                  <span
+                    className="ms-1 rounded bg-amber-500/25 px-1 text-[9px] text-amber-300"
+                    dir="rtl"
+                    title="سرویس پیش‌بینی موقتاً در دسترس نیست؛ نقشه تا بازگشت آن از داده شبیه‌سازی‌شده استفاده می‌کند"
+                  >
+                    شبیه‌سازی
+                  </span>
+                )}
               </>
             )}
             {inModelZone && fc.loading && fcLen === 0 && (
