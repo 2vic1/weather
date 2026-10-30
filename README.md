@@ -185,7 +185,7 @@ sudo certbot --nginx -d your-domain.com
 ### روش ۲: با Docker (ساده‌ترین راه) 🐳
 
 ```bash
-docker build -t asmanegar .
+docker build -f docker/Dockerfile.github -t asmanegar .
 docker run -d --name asmanegar -p 3000:3000 --restart unless-stopped asmanegar
 ```
 
